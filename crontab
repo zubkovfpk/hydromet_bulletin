@@ -1,0 +1,12 @@
+# Гидрометеорологический бюллетень — расписание cron (UTC)
+# MSK = UTC+3: 09:00 MSK → 06:00 UTC | 19:00 MSK → 16:00 UTC
+#
+# Формат: минута час день месяц день_недели команда
+
+# Утренний бюллетень — 09:00 MSK (06:00 UTC)
+0 6 * * * root cd /app && /usr/local/bin/python forecast_morning.py --config /app/config.ini >> /app/logs/cron.log 2>&1
+
+# Вечерний бюллетень — 19:00 MSK (16:00 UTC)
+0 16 * * * root cd /app && /usr/local/bin/python forecast_evening.py --config /app/config.ini >> /app/logs/cron.log 2>&1
+
+# Пустая строка в конце — обязательно для cron

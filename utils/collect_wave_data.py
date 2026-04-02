@@ -1,0 +1,121 @@
+"""
+collect_wave_data.py
+Конвертация MATLAB collect_wave_data.m → Python
+
+Читает NetCDF-файлы волнового прогноза CMEMS (mfwamglocep_*.nc),
+вырезает область Каспийского моря, агрегирует по суткам.
+"""
+
+from pathlib import Path
+from datetime import datetime, timedelta
+
+import numpy as np
+import netCDF4 as nc
+import geopandas as gpd
+from shapely.geometry import Point
+
+
+# Epoch CMEMS: часы с 1950-01-01
+CMEMS_EPOCH = datetime(1950, 1, 1)
+
+
+def _hours_to_date(hours: float) -> datetime:
+    return CMEMS_EPOCH + timedelta(hours=float(hours))
+
+
+def _build_mask(lon_grid: np.ndarray, lat_grid: np.ndarray,
+                shapefile_path: str) -> np.ndarray:
+    gdf = gpd.read_file(shapefile_path)
+    union = gdf.unary_union
+    mask = np.zeros(lon_grid.shape, dtype=bool)
+    for i in range(lon_grid.shape[0]):
+        for j in range(lon_grid.shape[1]):
+            mask[i, j] = union.contains(Point(lon_grid[i, j], lat_grid[i, j]))
+    return mask
+
+
+def collect_wave_data(
+    base_dir: str = ".",
+    waves_dir: str = "waves",
+    shapefile: str = "Kasp_Sea.shp",
+    lon_bounds: tuple = (46, 55),
+    lat_bounds: tuple = (42, 48),
+) -> tuple[np.ndarray, datetime, datetime]:
+    """
+    Загружает данные высоты волн VHM0_WW из CMEMS.
+
+    Parameters
+    ----------
+    base_dir   : str   — корневая папка проекта
+    waves_dir  : str   — подпапка с .nc файлами волн
+    shapefile  : str   — контур акватории
+    lon_bounds : tuple — (min_lon, max_lon) для обрезки
+    lat_bounds : tuple — (min_lat, max_lat) для обрезки
+
+    Returns
+    -------
+    Wave       : np.ndarray (nx, ny, 5) — средняя высота волн по суткам
+    start_date : datetime
+    end_date   : datetime
+    """
+    wave_path = Path(base_dir) / waves_dir
+    nc_files = sorted(wave_path.glob("*.nc"))
+
+    # Глобальный буфер: 4320×2041×40 (как в оригинале)
+    # Размер определим по первому файлу
+    with nc.Dataset(nc_files[0]) as ds0:
+        lon_full = ds0.variables["longitude"][:].data
+        lat_full = ds0.variables["latitude"][:].data
+        nx_full = len(lon_full)
+        ny_full = len(lat_full)
+
+    H_Wave = np.zeros((nx_full, ny_full, 40))
+    start_date = end_date = None
+    i, j = 3, 6  # индексы слоёв (0-based: 3:7 = шаги 4-7)
+
+    for idx, nc_file in enumerate(nc_files):
+        with nc.Dataset(nc_file) as ds:
+            h_wave = ds.variables["VHM0_WW"][:]  # (time, lat, lon) → транспонируем
+            h_wave = np.transpose(h_wave.data, (2, 1, 0))  # → (lon, lat, time)
+            time_arr = ds.variables["time"][:].data
+
+            if idx == 0:
+                H_Wave[:, :, 0:3] = h_wave[:, :, 1:4]
+                start_date = _hours_to_date(time_arr[0])
+            elif idx == len(nc_files) - 1:
+                H_Wave[:, :, 39] = h_wave[:, :, 0]
+                end_date = _hours_to_date(time_arr[0])
+            else:
+                end_idx = min(i + 4, 40)
+                take = end_idx - i
+                H_Wave[:, :, i:end_idx] = h_wave[:, :, :take]
+                i += 4
+                j += 4
+
+    # Обрезка по области Каспия
+    lon_mask = (lon_full >= lon_bounds[0]) & (lon_full <= lon_bounds[1])
+    lat_mask = (lat_full >= lat_bounds[0]) & (lat_full <= lat_bounds[1])
+
+    Hwave = H_Wave[np.ix_(lon_mask, lat_mask, np.arange(40))]
+    lon_crop = lon_full[lon_mask]
+    lat_crop = lat_full[lat_mask]
+
+    Lon_raw, Lat_raw = np.meshgrid(lon_crop, lat_crop)
+    Lon = Lon_raw.T
+    Lat = Lat_raw.T
+
+    # Маска акватории
+    shp_path = Path(base_dir) / shapefile
+    mask = _build_mask(Lon, Lat, str(shp_path))
+
+    # Агрегация: 8 шагов × 3ч = 24ч → 5 суток
+    Wave = np.full((*Hwave.shape[:2], 5), np.nan)
+    for d in range(5):
+        s = d * 8
+        e = s + 8
+        Wave[:, :, d] = np.mean(Hwave[:, :, s:e], axis=2)
+
+    # Применяем маску
+    Wave[~np.broadcast_to(mask[:, :, np.newaxis], Wave.shape)] = np.nan
+
+    return Wave, start_date, end_date

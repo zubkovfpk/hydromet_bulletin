@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Secrets and local config
+.env
+.env.*
+config.ini
+config.local.ini
+secrets.ini
+
+# Logs
+logs/
+*.log
+
+# Output artifacts
+output/
+reports/
+tmp/
+temp/
+
+# Data files generated or downloaded locally
+data/raw/
+data/cache/
+data/tmp/
+
+# Jupyter / notebooks
+.ipynb_checkpoints/
+
+# IDE / editor
+.vscode/
+.idea/
+
+# Local docs (not for repo)
+ReadMe.txt
+
+# OS files
+Thumbs.db
+.DS_Store

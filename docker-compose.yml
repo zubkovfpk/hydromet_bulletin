@@ -1,0 +1,53 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# hydromet_bulletin — docker-compose.yml
+#
+# Запуск:   docker-compose up -d
+# Логи:     docker-compose logs -f
+# Стоп:     docker-compose down
+# Ручной запуск бюллетеня:
+#   docker-compose exec bulletin python forecast_morning.py
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  bulletin:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hydromet_bulletin
+    restart: unless-stopped          # автозапуск после перезагрузки сервера
+
+    volumes:
+      # Входные данные (GFS NetCDF, волны CMEMS, шейп-файлы)
+      # Монтируем с хоста, чтобы Meteo_Parser.exe мог туда писать
+      - ./Meteo_Parser_2026:/app/Meteo_Parser_2026
+      - ./waves:/app/waves
+      - ./Kasp_Sea.shp:/app/Kasp_Sea.shp:ro
+      - ./Kasp_Sea.dbf:/app/Kasp_Sea.dbf:ro
+      - ./Kasp_Sea.prj:/app/Kasp_Sea.prj:ro
+      - ./Kasp_Sea.shx:/app/Kasp_Sea.shx:ro
+      - ./Kasp_Sea.cpg:/app/Kasp_Sea.cpg:ro
+
+      # Конфиг (можно редактировать без пересборки образа)
+      - ./config.ini:/app/config.ini
+
+      # Выходные .docx бюллетени — доступны на хосте в ./output/
+      - ./output:/app/output
+
+      # Логи — доступны на хосте в ./logs/
+      - ./logs:/app/logs
+
+    environment:
+      - TZ=UTC
+      - PYTHONUNBUFFERED=1             # сразу видим print/logging в docker logs
+
+    # Ограничения ресурсов под 4 CPU / 4 GB RAM сервера
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
