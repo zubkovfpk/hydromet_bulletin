@@ -46,6 +46,9 @@ data/tmp/
 # Local docs (not for repo)
 ReadMe.txt
 
+# Word docs from original Matlab materials
+matlab_original/*.docx
+
 # OS files
 Thumbs.db
 .DS_Store
