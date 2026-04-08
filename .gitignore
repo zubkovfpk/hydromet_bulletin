@@ -49,6 +49,9 @@ ReadMe.txt
 # Word docs from original Matlab materials
 matlab_original/*.docx
 
+#Etalon NetCDF-data
+etalon_data/
+
 # OS files
 Thumbs.db
 .DS_Store
