@@ -36,6 +36,9 @@ data/raw/
 data/cache/
 data/tmp/
 
+# Local sample/etalon data
+etalon_data/
+
 # Jupyter / notebooks
 .ipynb_checkpoints/
 
