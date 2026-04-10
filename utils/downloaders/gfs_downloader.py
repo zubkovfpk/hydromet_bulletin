@@ -5,6 +5,10 @@ from __future__ import annotations
 
 import configparser
 import logging
+import time
+from pathlib import Path
+
+import requests
 
 
 class GFSDownloader:
@@ -38,6 +42,14 @@ class GFSDownloader:
         self.forecast_hours_step = self.cfg.getint("GFS_FORECAST", "GFS_FORECAST_HOURS_STEP", fallback=1)
         self.variables = self.cfg.get("GFS_FORECAST", "GFS_VARIABLES", fallback="")
         self.levels = self.cfg.get("GFS_FORECAST", "GFS_LEVELS", fallback="")
+        self.work_dir = Path(
+            self.cfg.get("GFS_STORAGE", "GFS_WORK_DIR", fallback="data/work/gfs")
+        )
+        self.enable_conversion_to_netcdf = (
+            self.cfg.getboolean("GFS_VALIDATION", "GFS_ENABLE_CONVERSION_TO_NETCDF", fallback=False)
+            if self.cfg.has_section("GFS_VALIDATION")
+            else False
+        )
 
     def download(self, date: str, cycle: str) -> bool:
         """Download GFS inputs for date/cycle.
@@ -58,6 +70,114 @@ class GFSDownloader:
             bool: True when ingestion succeeds, False otherwise.
         """
         self.logger.info("GFS download requested for date=%s cycle=%s", date, cycle)
-        # Placeholder implementation. Real request/parse/save/retry logic
-        # must be implemented after design review and integration decisions.
-        raise NotImplementedError("GFS downloader is a skeleton and must be implemented")
+        session = requests.Session()
+
+        try:
+            cycle_num = cycle.lower().replace("z", "").strip()
+            model_path = self.model_path_template.replace("{yyyymmdd}", date).replace("{cycle}", cycle_num)
+            model_url = f"{self.base_url.rstrip('/')}/{model_path.lstrip('/')}"
+            self.logger.info("GFS model URL: %s", model_url)
+        except Exception:
+            self.logger.exception("GFS: failed to build model URL")
+            return False
+
+        # Step 2 - Build target forecast files list.
+        try:
+            hours = list(
+                range(
+                    self.forecast_hours_start,
+                    self.forecast_hours_end + 1,
+                    self.forecast_hours_step,
+                )
+            )
+            forecast_files = [f"gfs.t{cycle_num}z.pgrb2.0p25.f{hour:03d}" for hour in hours]
+        except Exception:
+            self.logger.exception("GFS: failed to build forecast file list")
+            return False
+
+        # Step 3 - Download with retry.
+        try:
+            self.work_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            self.logger.exception("GFS: failed to create work dir: %s", self.work_dir)
+            return False
+
+        var_parts = [v.strip() for v in self.variables.split(",") if v.strip()]
+        lev_parts = [l.strip() for l in self.levels.split(",") if l.strip()]
+
+        downloaded_files: dict[int, Path] = {}
+        for hour, file_name in zip(hours, forecast_files):
+            target_path = self.work_dir / file_name
+            query = {"dir": f"/{model_path}", "file": file_name}
+            for var_name in var_parts:
+                query[f"var_{var_name}"] = "on"
+            for level_name in lev_parts:
+                query[f"lev_{level_name}"] = "on"
+
+            success = False
+            for attempt in range(1, self.max_retries + 1):
+                try:
+                    with session.get(
+                        model_url,
+                        params=query,
+                        timeout=self.timeout_seconds,
+                        stream=True,
+                    ) as response:
+                        response.raise_for_status()
+                        with target_path.open("wb") as file_handle:
+                            for chunk in response.iter_content(chunk_size=1024 * 1024):
+                                if chunk:
+                                    file_handle.write(chunk)
+                    success = True
+                    downloaded_files[hour] = target_path
+                    self.logger.info("GFS download OK: %s", file_name)
+                    break
+                except Exception:
+                    self.logger.exception(
+                        "GFS download failed: %s (attempt %d/%d)",
+                        file_name,
+                        attempt,
+                        self.max_retries,
+                    )
+                    if attempt < self.max_retries:
+                        time.sleep(self.retry_delay_seconds)
+
+            if not success:
+                self.logger.error("GFS retries exhausted: %s", file_name)
+
+        # Step 4 - Format checks.
+        non_empty_hours: set[int] = set()
+        for hour, file_path in downloaded_files.items():
+            try:
+                if file_path.stat().st_size > 0:
+                    non_empty_hours.add(hour)
+                    self.logger.info("GFS validation OK: %s", file_path.name)
+                else:
+                    self.logger.error("GFS validation failed (empty file): %s", file_path.name)
+            except Exception:
+                self.logger.exception("GFS validation failed: %s", file_path.name)
+
+        if self.enable_conversion_to_netcdf:
+            self.logger.info(
+                "GFS conversion flag is enabled: NetCDF conversion is planned (stub only)."
+            )
+
+        # Step 5 - Completeness check.
+        expected_hours = set(hours)
+        missing_hours = sorted(expected_hours - non_empty_hours)
+        if missing_hours:
+            self.logger.warning(
+                "GFS forecast incomplete: expected=%d, ready=%d, missing_hours=%s",
+                len(expected_hours),
+                len(non_empty_hours),
+                ",".join(f"{h:03d}" for h in missing_hours),
+            )
+            return False
+
+        self.logger.info(
+            "GFS download complete: expected=%d downloaded=%d non_empty=%d",
+            len(expected_hours),
+            len(downloaded_files),
+            len(non_empty_hours),
+        )
+        return len(non_empty_hours) == len(expected_hours)
