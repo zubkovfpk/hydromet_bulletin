@@ -63,7 +63,10 @@ def main() -> int:
         cfg = _load_config(args.config)
         _validate_sections(cfg)
 
-        run_date = args.date or cfg.get("FORECAST", "run_date", fallback="")
+        run_date = args.date or cfg.get("General", "target_date", fallback="").strip()
+        if not run_date:
+            from datetime import date
+            run_date = date.today().strftime("%Y%m%d")
         gfs_cycle = args.cycle or cfg.get("GFS_SOURCES", "GFS_CYCLES", fallback="00z").split(",")[0].strip()
 
         cmems = CMEMSDownloader(cfg, logger=logger)

@@ -71,14 +71,14 @@ class GFSDownloader:
         """
         self.logger.info("GFS download requested for date=%s cycle=%s", date, cycle)
         session = requests.Session()
+        session.headers.update({"User-Agent": "Mozilla/5.0 (compatible; hydromet-bulletin/1.0)"})
 
         try:
             cycle_num = cycle.lower().replace("z", "").strip()
             model_path = self.model_path_template.replace("{yyyymmdd}", date).replace("{cycle}", cycle_num)
-            model_url = f"{self.base_url.rstrip('/')}/{model_path.lstrip('/')}"
-            self.logger.info("GFS model URL: %s", model_url)
+            self.logger.info("GFS NOMADS base URL: %s  dir=/%s", self.base_url, model_path.lstrip("/"))
         except Exception:
-            self.logger.exception("GFS: failed to build model URL")
+            self.logger.exception("GFS: failed to build model path")
             return False
 
         # Step 2 - Build target forecast files list.
@@ -102,24 +102,16 @@ class GFSDownloader:
             self.logger.exception("GFS: failed to create work dir: %s", self.work_dir)
             return False
 
-        var_parts = [v.strip() for v in self.variables.split(",") if v.strip()]
-        lev_parts = [l.strip() for l in self.levels.split(",") if l.strip()]
-
         downloaded_files: dict[int, Path] = {}
         for hour, file_name in zip(hours, forecast_files):
             target_path = self.work_dir / file_name
-            query = {"dir": f"/{model_path}", "file": file_name}
-            for var_name in var_parts:
-                query[f"var_{var_name}"] = "on"
-            for level_name in lev_parts:
-                query[f"lev_{level_name}"] = "on"
+            file_url = f"{self.base_url.rstrip('/')}/{model_path.strip('/')}/{file_name}"
 
             success = False
             for attempt in range(1, self.max_retries + 1):
                 try:
                     with session.get(
-                        model_url,
-                        params=query,
+                        file_url,
                         timeout=self.timeout_seconds,
                         stream=True,
                     ) as response:
