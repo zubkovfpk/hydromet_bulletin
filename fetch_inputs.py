@@ -42,7 +42,7 @@ def _load_config(config_path: str) -> configparser.ConfigParser:
 
 def _validate_sections(cfg: configparser.ConfigParser) -> None:
     """Ensure required sections exist for the wrapper flow."""
-    required_sections = ("SOURCES", "GFS_SOURCES", "GFS_DOWNLOAD", "FORECAST")
+    required_sections = ("CMEMS_SOURCES", "CMEMS_FORECAST", "GFS_SOURCES", "GFS_DOWNLOAD", "GFS_FORECAST")
     missing = [name for name in required_sections if not cfg.has_section(name)]
     if missing:
         raise KeyError(f"Missing required config sections: {', '.join(missing)}")
