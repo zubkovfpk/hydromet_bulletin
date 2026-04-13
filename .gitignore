@@ -32,9 +32,15 @@ tmp/
 temp/
 
 # Data files generated or downloaded locally
+data/work/
+data/storage/
+data/output/
 data/raw/
 data/cache/
 data/tmp/
+
+# Local sample/etalon data
+etalon_data/
 
 # Jupyter / notebooks
 .ipynb_checkpoints/

@@ -4,6 +4,9 @@
 # Работа с NetCDF (метеоданные GFS и волны CMEMS)
 netCDF4>=1.7.0
 
+# Copernicus Marine Toolbox (скачивание CMEMS)
+copernicusmarine>=2.0.0
+
 # Геопространственные операции (маска акватории по shp)
 geopandas>=0.14.0
 shapely>=2.0.0
