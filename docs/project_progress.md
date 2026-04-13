@@ -16,9 +16,6 @@ gantt
     fetch_inputs.py            :done, 2026-04-12, 1d
     cmems_downloader.py        :done, 2026-04-12, 1d
     gfs_downloader.py          :done, 2026-04-12, 1d
-    era5_downloader.py         :active, 2026-04-13, 1d
-    satellite_downloader.py    :2026-04-14, 1d
-    gauge_downloader.py        :2026-04-14, 1d
     section Тесты и финализация
     Интеграционные тесты       :2026-04-15, 1d
     Финальный коммит           :2026-04-15, 1d
@@ -30,12 +27,12 @@ gantt
 |--------|------|-------------|-----------|
 | 1 | 11.04.2026 | ~8 ч | Git, IDE, документация, скелет, smoke-тесты |
 | 2 | 12.04.2026 | ~5 ч | config.ini, CMEMS + GFS реально работают |
-| 3 | 13.04.2026 | в процессе | ERA5, satellite, gauge загрузчики |
+| 3 | 13.04.2026 | ~3 ч | Рефакторинг config.ini (CMEMS_*/GFS_* секции), починка gfs_downloader.py (NOMADS filter + requests), починка cmems_downloader.py, smoke-тесты обоих загрузчиков (GFS: 40/40, 138.9s; CMEMS init: 0.001s) |
 
-## Общий прогресс: ~45%
+## Общий прогресс: ~65%
 
 ```mermaid
 pie title Выполнено vs Осталось
-    "Выполнено" : 45
-    "Осталось" : 55
+    "Выполнено" : 65
+    "Осталось" : 35
 ```
