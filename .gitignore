@@ -32,6 +32,9 @@ tmp/
 temp/
 
 # Data files generated or downloaded locally
+data/work/
+data/storage/
+data/output/
 data/raw/
 data/cache/
 data/tmp/
