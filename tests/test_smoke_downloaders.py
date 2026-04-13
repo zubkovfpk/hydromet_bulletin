@@ -50,25 +50,29 @@ class TestSmokeDownloaders(unittest.TestCase):
 
     def test_cmems_downloader_init_from_example_config(self) -> None:
         d = CMEMSDownloader(self.cfg, logger=self.logger)
-        # __init__ reads SOURCES/base_url; example.ini uses cmems_base_url — URL must exist in config
-        self.assertTrue(self.cfg.get("SOURCES", "cmems_base_url", fallback="").strip())
+        self.assertTrue(self.cfg.get("CMEMS_SOURCES", "cmems_base_url", fallback="").strip())
         self.assertTrue(d.auth_method)
         self.assertIsNotNone(d.timeout_seconds)
         self.assertGreater(d.timeout_seconds, 0)
         self.assertIsNotNone(d.max_retries)
         self.assertGreaterEqual(d.max_retries, 0)
         self.assertTrue(str(d.storage_dir).strip())
+        self.assertTrue(d.file_patterns_raw.strip())
 
     def test_gfs_downloader_init_from_example_config(self) -> None:
         d = GFSDownloader(self.cfg, logger=self.logger)
-        self.assertTrue(d.base_url.strip())
-        self.assertTrue(d.model_path_template.strip())
+        self.assertTrue(d.main_url.strip())
         self.assertIsNotNone(d.timeout_seconds)
         self.assertGreater(d.timeout_seconds, 0)
         self.assertIsNotNone(d.max_retries)
         self.assertGreaterEqual(d.max_retries, 0)
         self.assertTrue(str(d.work_dir).strip())
-        self.assertGreater(d.forecast_hours_end, d.forecast_hours_start)
+        self.assertGreater(d.hours_end, d.hours_start)
+        self.assertTrue(d.variables_str.strip())
+        self.assertTrue(d.levels_str.strip())
+        self.assertEqual(d.hours_step, 3)
+        self.assertEqual(d.hours_start, 6)
+        self.assertEqual(d.hours_end, 123)
 
     def test_fetch_inputs_imports(self) -> None:
         import importlib
