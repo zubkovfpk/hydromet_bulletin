@@ -12,31 +12,32 @@ class CMEMSDownloader:
     """Wrapper over CMEMS fetch flow described in project docs.
 
     Expected config sections:
-    - [SOURCES]
+    - [CMEMS_SOURCES]
+    - [CMEMS_FORECAST]
     """
 
     def __init__(self, cfg: configparser.ConfigParser, logger: logging.Logger | None = None) -> None:
         self.cfg = cfg
         self.logger = logger or logging.getLogger(__name__)
 
-        if not self.cfg.has_section("SOURCES"):
-            raise KeyError("Missing [SOURCES] section in config")
+        if not self.cfg.has_section("CMEMS_SOURCES"):
+            raise KeyError("Missing [CMEMS_SOURCES] section in config")
 
-        self.cmems_base_url = self.cfg.get("SOURCES", "cmems_base_url", fallback="")
-        self.cmems_dataset = self.cfg.get("SOURCES", "cmems_dataset_id", fallback="")
-        self.cmems_dynamic_path_mask = self.cfg.get("SOURCES", "cmems_dynamic_path_mask", fallback="/{yyyy}/{mm}/")
-        self.cmems_product_path = self.cfg.get("SOURCES", "cmems_product_path", fallback="")
+        self.cmems_base_url = self.cfg.get("CMEMS_SOURCES", "cmems_base_url", fallback="")
+        self.cmems_dataset = self.cfg.get("CMEMS_SOURCES", "cmems_dataset_id", fallback="")
+        self.cmems_dynamic_path_mask = self.cfg.get("CMEMS_SOURCES", "cmems_dynamic_path_mask", fallback="/{yyyy}/{mm}/")
+        self.cmems_product_path = self.cfg.get("CMEMS_SOURCES", "cmems_product_path", fallback="")
 
-        self.auth_method = self.cfg.get("SOURCES", "cmems_auth_method", fallback="token")
-        self.username = self.cfg.get("SOURCES", "cmems_username", fallback="")
-        self.password = self.cfg.get("SOURCES", "cmems_password", fallback="")
-        self.token = self.cfg.get("SOURCES", "cmems_token", fallback="")
+        self.auth_method = self.cfg.get("CMEMS_SOURCES", "cmems_auth_method", fallback="token")
+        self.username = self.cfg.get("CMEMS_SOURCES", "cmems_username", fallback="")
+        self.password = self.cfg.get("CMEMS_SOURCES", "cmems_password", fallback="")
+        self.token = self.cfg.get("CMEMS_SOURCES", "cmems_token", fallback="")
         self.timeout_seconds = self.cfg.getint("DOWNLOAD", "download_timeout_seconds", fallback=600)
         self.max_retries = self.cfg.getint("DOWNLOAD", "download_retry_count", fallback=3)
         self.retry_delay_seconds = self.cfg.getint("DOWNLOAD", "download_retry_delay_seconds", fallback=30)
         self.storage_dir = Path(self.cfg.get("STORAGE", "storage_dir", fallback="data/storage"))
         self.replace_existing = self.cfg.getboolean("DOWNLOAD", "replace_same_name_files", fallback=True)
-        self.file_patterns_raw = self.cfg.get("FORECAST", "file_name_patterns", fallback="*.nc")
+        self.file_patterns_raw = self.cfg.get("CMEMS_FORECAST", "file_name_patterns", fallback="*.nc")
 
     def download(self, date: str) -> bool:
         """Download CMEMS inputs for provided date via Copernicus Marine Toolbox.
