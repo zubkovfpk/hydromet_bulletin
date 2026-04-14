@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import configparser
 import logging
+import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from pathlib import Path
 
 
@@ -39,6 +41,32 @@ class CMEMSDownloader:
         self.replace_existing = self.cfg.getboolean("DOWNLOAD", "replace_same_name_files", fallback=True)
         self.file_patterns_raw = self.cfg.get("CMEMS_FORECAST", "file_name_patterns", fallback="*.nc")
 
+    def _ensure_login(self, copernicusmarine):
+        """Ensure CMEMS credentials are available for toolbox calls."""
+        import os
+
+        env_user = os.environ.get("COPERNICUSMARINE_SERVICE_USERNAME")
+        env_pass = os.environ.get("COPERNICUSMARINE_SERVICE_PASSWORD")
+        username = env_user or self.username or None
+        password = env_pass or self.password or None
+
+        try:
+            if self.username and self.password and not (env_user and env_pass):
+                credentials_path = Path.home() / ".copernicusmarine" / ".copernicusmarine-credentials"
+                if not credentials_path.exists():
+                    # Keep existing credentials file if present, avoid interactive overwrite.
+                    copernicusmarine.login(
+                        username=self.username,
+                        password=self.password,
+                        force_overwrite=False,
+                    )
+                else:
+                    self.logger.info("CMEMS: using existing credentials file")
+            return username, password
+        except Exception:
+            self.logger.exception("CMEMS: copernicusmarine.login failed")
+            return None, None
+
     def download(self, date: str) -> bool:
         """Download CMEMS inputs for provided date via Copernicus Marine Toolbox.
 
@@ -56,7 +84,6 @@ class CMEMSDownloader:
         Returns:
             bool: True if ``copernicusmarine.get`` completes without raising.
         """
-        import os
         from datetime import datetime, timedelta, timezone
 
         try:
@@ -91,29 +118,11 @@ class CMEMSDownloader:
             self.logger.exception("CMEMS: cannot create storage_dir %s", self.storage_dir)
             return False
 
-        env_user = os.environ.get("COPERNICUSMARINE_SERVICE_USERNAME")
-        env_pass = os.environ.get("COPERNICUSMARINE_SERVICE_PASSWORD")
-
-        try:
-            if self.username and self.password and not (env_user and env_pass):
-                credentials_path = Path.home() / ".copernicusmarine" / ".copernicusmarine-credentials"
-                if not credentials_path.exists():
-                    # Toolbox API: force_overwrite=False keeps existing credentials file (no interactive overwrite).
-                    copernicusmarine.login(
-                        username=self.username,
-                        password=self.password,
-                        force_overwrite=False,
-                    )
-                else:
-                    self.logger.info("CMEMS: using existing credentials file")
-        except Exception:
-            self.logger.exception("CMEMS: copernicusmarine.login failed")
+        username, password = self._ensure_login(copernicusmarine)
+        if (self.username and self.password) and (username is None and password is None):
             return False
 
-        username = env_user or self.username or None
-        password = env_pass or self.password or None
-
-        try:
+        def _run_get_call() -> None:
             copernicusmarine.get(
                 dataset_id=self.cmems_dataset,
                 output_directory=self.storage_dir,
@@ -123,7 +132,41 @@ class CMEMSDownloader:
                 filter=f"*{date}*",
                 disable_progress_bar=True,
             )
-            return True
-        except Exception:
-            self.logger.exception("CMEMS: copernicusmarine.get failed")
-            return False
+
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                self.logger.info(
+                    "CMEMS: download attempt %d/%d (timeout=%ss)",
+                    attempt,
+                    self.max_retries,
+                    self.timeout_seconds,
+                )
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(_run_get_call)
+                    future.result(timeout=self.timeout_seconds)
+                self.logger.info("CMEMS: copernicusmarine.get completed successfully")
+                return True
+            except FuturesTimeoutError:
+                self.logger.error(
+                    "CMEMS: attempt %d/%d timed out after %ss",
+                    attempt,
+                    self.max_retries,
+                    self.timeout_seconds,
+                )
+            except Exception:
+                self.logger.exception(
+                    "CMEMS: attempt %d/%d failed due to exception",
+                    attempt,
+                    self.max_retries,
+                )
+
+            if attempt < self.max_retries:
+                sleep_seconds = self.retry_delay_seconds * (2 ** (attempt - 1))
+                self.logger.info(
+                    "CMEMS: waiting %ss before next retry",
+                    sleep_seconds,
+                )
+                time.sleep(sleep_seconds)
+
+        self.logger.error("CMEMS: all retry attempts exhausted")
+        return False
