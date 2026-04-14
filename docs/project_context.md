@@ -120,20 +120,32 @@ hydromet_bulletin/
 - **CMEMS auth**: поддерживает `token` (header `Authorization: Bearer`) и `password` (credentials file через `copernicusmarine.login()`). Env vars `COPERNICUSMARINE_SERVICE_USERNAME/PASSWORD` имеют приоритет.
 - **Credentials**: никогда не коммитятся. `config.ini` в `.gitignore`. Только `config.example.ini` с `CHANGE_ME`.
 - **Config**: `configparser.ConfigParser` (case-insensitive keys). Секции `CMEMS_*` и `GFS_*` разделены, общие `[DOWNLOAD]`/`[STORAGE]`/`[LOGGING]` — для CMEMS.
-- **Python интерпретатор**: `C:\Users\zubko\AppData\Local\Programs\Python\Python313\python.exe`  
-  В Git Bash: `/c/Users/zubko/AppData/Local/Programs/Python/Python313/python.exe`  
+- **Python интерпретатор**: использовать `py` (Python Launcher для Windows) — он автоматически находит установленный Python 3.x без привязки к конкретному пути.  
   **НЕ использовать просто `python`** — в системе он указывает на Microsoft Store stub.
 - **Запуск smoke-тестов**:
   ```bash
-  /c/Users/zubko/AppData/Local/Programs/Python/Python313/python.exe -m pytest tests/test_smoke_downloaders.py -v
+  py -m pytest tests/test_smoke_downloaders.py -v
   ```
 - **Запуск интеграционных тестов CMEMS** (требуют реальных credentials и сети):
   ```bash
-  CMEMS_TEST_CONFIG=config.ini /c/Users/zubko/AppData/Local/Programs/Python/Python313/python.exe \
-  -m pytest tests/test_integration_cmems.py -v -m integration -s
+  CMEMS_TEST_CONFIG=config.ini py -m pytest tests/test_integration_cmems.py -v -m integration -s
   ```
 - **pytest.ini** зарегистрирован в корне проекта с маркером `integration`.
 - **CONFIG_PATH в тестах** читается через `os.environ.get("CMEMS_TEST_CONFIG", "config.example.ini")` — позволяет подставлять реальный `config.ini` без изменения кода.
+
+- **Windsurf/Pyright: выбор интерпретатора (важно)**:
+  - Для запуска команд в терминале использовать `py` (Python Launcher для Windows).
+  - Для IDE/Pyright путь к интерпретатору фиксировать через `.vscode/settings.json` (файл в `.gitignore`):
+    ```json
+    {
+      "python.defaultInterpreterPath": "C:\\Users\\zubko\\AppData\\Local\\Programs\\Python\\Python313\\python.exe"
+    }
+    ```
+  - В этой сборке Windsurf Pyright `pyrightconfig.json` **не принимает** опции `pythonPath` / `pythonInterpreterPath` (ошибка `unknown config option`).
+  - Предупреждение от `Python Environments` про `Default interpreter path ... could not be resolved` может появляться даже когда интерпретатор уже активен; ориентироваться на статус-бар (должно быть `Python 3.13.x`) и проверку:
+    ```bash
+    py -3 -c "import sys; print(sys.executable)"
+    ```
 
 
 ## 6. Известные проблемы
@@ -199,19 +211,34 @@ cat docs/project_context.md
 
 Smoke-тесты (без сети):
 ```bash
-/c/Users/zubko/AppData/Local/Programs/Python/Python313/python.exe \
--m pytest tests/test_smoke_downloaders.py -v
+py -m pytest tests/test_smoke_downloaders.py -v
 ```
 
 Интеграционные тесты CMEMS (требуют сети и credentials):
 ```bash
-CMEMS_TEST_CONFIG=config.ini \
-/c/Users/zubko/AppData/Local/Programs/Python/Python313/python.exe \
--m pytest tests/test_integration_cmems.py -v -m integration -s
+CMEMS_TEST_CONFIG=config.ini py -m pytest tests/test_integration_cmems.py -v -m integration -s
 ```
 
-> **НЕ использовать просто `python`** — в системе это Microsoft Store stub.  
+> Использовать `py` (Python Launcher для Windows), не `python` (Microsoft Store stub).  
 > `CONFIG_PATH` в тестах управляется через `CMEMS_TEST_CONFIG` env var.
+
+> Для Windsurf/Pyright интерпретатор задаётся через `.vscode/settings.json` (`python.defaultInterpreterPath`).
+> `pyrightconfig.json` хранит только настройки type checking и **не** должен содержать `pythonPath`/`pythonInterpreterPath`.
+
+**Merge feature-ветки в master:**
+
+Всегда делать через Git Bash, **не через GitHub UI**:
+```bash
+git checkout master
+git merge --no-ff feature/data-ingestion -m "feat: <описание>
+
+- пункт 1
+- пункт 2"
+git push origin master
+```
+
+Затем закрыть PR на GitHub вручную, если он был открыт.  
+**НЕ использовать GitHub UI для merge — только Git Bash.**
 
 **Стиль работы:**
 - Промпты для агентов Cursor/Windsurf вместо листингов кода — описывать задачу, не диктовать реализацию.
