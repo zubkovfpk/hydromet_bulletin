@@ -74,15 +74,14 @@ class TestGFSIntegration(unittest.TestCase):
         downloader = GFSDownloader(self.cfg, logger=self.logger)
         downloader.download(self.yesterday, self.cycle)
 
-        # Downloader writes into work_dir; filenames follow NOMADS 'pgrb2' naming.
-        grib2_files = list(downloader.work_dir.rglob("*.grib2"))
-        if not grib2_files:
-            grib2_files = [p for p in downloader.work_dir.rglob("*") if p.is_file() and "pgrb2" in p.name]
+        cycle_num = self.cycle.lower().replace("z", "").strip()
+        expected_dir = downloader.storage_dir / self.yesterday / f"{cycle_num}z"
+        grib2_files = [p for p in expected_dir.rglob("*") if p.is_file() and "pgrb2" in p.name]
 
         self.assertGreater(
             len(grib2_files),
             0,
-            f"No GRIB2-like files found under {downloader.work_dir} after download",
+            f"No GRIB2-like files found under {expected_dir} after download",
         )
 
     @pytest.mark.integration

@@ -952,3 +952,46 @@ PDF — не лучший вариант. Я смогу его прочитат�
 3. CHANGELOG.md — дополнительно, для хронологии изменений по файлам.
 
 Рекомендую: создай project_context.md прямо сейчас — дай промпт агенту Cursor, он соберёт его из текущей структуры проекта автоматически.
+
+---
+
+## Сессия 4 — 14.04.2026
+
+### Что сделано
+
+#### Настройка Python в Windsurf
+
+- **Проблема**: `python` в системе указывал на Microsoft Store stub.
+- **Решение**: интерпретатор задан через `.vscode/settings.json` (`python.defaultInterpreterPath`).
+- `pyrightconfig.json` создан для настроек type checking, но `pythonPath` / `pythonInterpreterPath` в этой сборке Windsurf Pyright не работают — только `typeCheckingMode`, `reportMissingImports` и т.д.
+- **Итог**: использовать `py` в терминале (Python Launcher), `.vscode/settings.json` для IDE.
+
+#### Интеграционные тесты GFSDownloader
+
+- Создан `tests/test_integration_gfs.py` — 3 теста по аналогии с CMEMS:
+  - `test_download_returns_true_for_recent_date`
+  - `test_download_creates_grib2_files_in_storage_dir`
+  - `test_retry_on_bad_url` — подменяет `main_url` на `http://127.0.0.1:9/`, проверяет логи retry
+- Результат: **3/3 PASSED**.
+- Время прогона: ~2 часа (два полных скачивания по 40 файлов + retry-тест).
+- Env var для запуска:
+  - PowerShell: `$env:GFS_TEST_CONFIG="config.ini"; py -m pytest tests/test_integration_gfs.py -v -m integration -s`
+  - Git Bash: `GFS_TEST_CONFIG=config.ini py -m pytest tests/test_integration_gfs.py -v -m integration -s`
+
+#### Исправление `docs/project_progress.md`
+
+- **Проблема**: файл был записан в одну строку с `<br>` вместо переносов — Mermaid не рендерился на GitHub.
+- **Исправлено**: нормальные переносы строк, диаграмма Ганта расширена до полного roadmap проекта (5 секций, до 28.04.2026). Прогресс скорректирован: 45% (не 65%) — обработка данных и генерация бюллетеня ещё не завершены.
+
+#### Зафиксирована архитектурная проблема хранилища GFS
+
+- CMEMS сохраняет в `data/storage/`, GFS — в `data/work/gfs/`: несоответствие назначению.
+- Двойной путь `gfs/gfs/` в некоторых запусках, `.idx`-файлы не фильтруются, нет логики skip-if-exists.
+- Целевая структура: `data/storage/gfs/YYYYMMDD/HHz/`.
+- Зафиксировано в `docs/project_context.md`, раздел «6. Известные проблемы».
+
+### Следующие задачи
+
+- Исправить архитектуру хранилища GFS: `gfs_downloader.py` (путь сохранения, фильтрация `.idx`), `config.example.ini` (`GFS_OUTPUT_DIR = data/storage/gfs`), привести `config.ini` в соответствие.
+- Добавить логику skip-if-exists для ускорения повторных запусков тестов.
+- Фильтрация `.idx`-файлов при скачивании.

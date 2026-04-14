@@ -52,7 +52,8 @@ class GFSDownloader:
         self.levels_str      = self.cfg.get("GFS_FORECAST", "GFS_LEVELS",    fallback="")
 
         # [GFS_STORAGE]
-        self.work_dir = Path(self.cfg.get("GFS_STORAGE", "GFS_WORK_DIR", fallback="data/work/gfs"))
+        self.work_dir    = Path(self.cfg.get("GFS_STORAGE", "GFS_WORK_DIR",   fallback="data/work/gfs"))
+        self.storage_dir = Path(self.cfg.get("GFS_STORAGE", "GFS_OUTPUT_DIR", fallback="data/storage/gfs"))
 
         # [GFS_VALIDATION]
         self.check_completeness = (
@@ -120,7 +121,8 @@ class GFSDownloader:
 
         cycle_num = cycle.lower().replace("z", "").strip()
         hours = list(range(self.hours_start, self.hours_end + 1, self.hours_step))
-        self.work_dir.mkdir(parents=True, exist_ok=True)
+        out_dir = self.storage_dir / date / f"{cycle_num}z"
+        out_dir.mkdir(parents=True, exist_ok=True)
 
         session = requests.Session()
         session.headers.update({"User-Agent": "hydromet-bulletin/1.0"})
@@ -130,8 +132,13 @@ class GFSDownloader:
         for fxx in hours:
             params      = self._build_query(date, cycle_num, fxx)
             file_name   = params["file"]
-            target_path = self.work_dir / file_name
+            target_path = out_dir / file_name
             downloaded  = False
+
+            if target_path.exists() and target_path.stat().st_size > 0:
+                self.logger.info("GFS skip (exists): %s", file_name)
+                success_count += 1
+                continue
 
             for attempt in range(1, self.max_retries + 1):
                 try:
@@ -165,6 +172,9 @@ class GFSDownloader:
 
             if not downloaded:
                 self.logger.error("GFS retries exhausted: %s", file_name)
+
+        for idx_file in out_dir.glob("*.idx"):
+            idx_file.unlink()
 
         # Проверка полноты
         if self.check_completeness and success_count < self.min_expected_files:

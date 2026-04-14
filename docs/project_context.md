@@ -83,6 +83,7 @@ hydromet_bulletin/
 | `[CMEMS_SOURCES]` | URL, product_path, dataset_id, динамическая маска пути, auth (token/password) |
 | `[CMEMS_FORECAST]` | Горизонт прогноза, файлов на цикл, временны́е окна, glob-паттерны имён файлов |
 | `[CMEMS_VALIDATION]` | Схема, обязательные переменные, bbox, флаг обрезки |
+| `[CMEMS_STORAGE]` | Рабочая директория и директория вывода CMEMS |
 | `[GFS_SOURCES]` | NOMADS filter URL, шаблон пути модели, циклы (00z/06z/12z/18z) |
 | `[GFS_DOWNLOAD]` | Расписание, timeout, retry, задержка |
 | `[GFS_FORECAST]` | Шаги прогноза (hours_start/end/step), переменные и уровни для filter URL |
@@ -161,7 +162,7 @@ hydromet_bulletin/
   - **Known limitation**: `ThreadPoolExecutor` не убивает зависший поток — поток `boto3` продолжает висеть в фоне после `future.result(timeout=N)`. Это ограничение `copernicusmarine` toolbox.
   - `test_timeout_is_respected` переработан: проверяет наличие строк `"timed out after 10s"` и `"retry attempts exhausted"` в логах, а не wall-clock время.
 
-- **ОТКРЫТО: Несогласованная структура хранилища GFS**:
+- **РЕШЕНО: Несогласованная структура хранилища GFS**:
   - CMEMS сохраняет файлы в `data/storage/` (финальное хранилище).
   - GFS сохраняет в `data/work/gfs/` (рабочая директория) — несоответствие назначению.
   - Часть файлов лежит в `data/work/gfs/` без подкаталогов, часть в `data/work/gfs/gfs/YYYYMMDD/` — двойной `gfs/gfs`, непоследовательно.
@@ -272,6 +273,6 @@ git push origin master
 **Стиль работы:**
 - Промпты для агентов Cursor/Windsurf вместо листингов кода — описывать задачу, не диктовать реализацию.
 - Коммиты через Git Bash в формате Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`, `test:`).
-- Не трогать `config.ini` (secrets). Шаблон — только `config.example.ini` с `CHANGE_ME`.
+- **`config.ini` (secrets)** — не изменять без явного разрешения пользователя. Если задача требует правки `config.ini`: сначала спросить «Разрешаешь внести изменение в `config.ini` через PowerShell?». При положительном ответе — выполнить командой. При отрицательном — описать, что и как пользователь должен добавить/изменить вручную. Шаблон — только `config.example.ini` с `CHANGE_ME`.
 - Проверять имена секций конфига перед правкой загрузчиков: `CMEMS_SOURCES`, `CMEMS_FORECAST`, `GFS_SOURCES`, `GFS_DOWNLOAD`, `GFS_FORECAST`, `GFS_STORAGE`.
 - Smoke-тесты: см. блок «Запуск тестов» выше.

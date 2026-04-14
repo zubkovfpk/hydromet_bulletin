@@ -37,7 +37,8 @@ class CMEMSDownloader:
         self.timeout_seconds = self.cfg.getint("DOWNLOAD", "download_timeout_seconds", fallback=600)
         self.max_retries = self.cfg.getint("DOWNLOAD", "download_retry_count", fallback=3)
         self.retry_delay_seconds = self.cfg.getint("DOWNLOAD", "download_retry_delay_seconds", fallback=30)
-        self.storage_dir = Path(self.cfg.get("STORAGE", "storage_dir", fallback="data/storage"))
+        self.work_dir    = Path(self.cfg.get("CMEMS_STORAGE", "CMEMS_WORK_DIR",   fallback=self.cfg.get("STORAGE", "work_dir",    fallback="data/work/cmems")))
+        self.storage_dir = Path(self.cfg.get("CMEMS_STORAGE", "CMEMS_OUTPUT_DIR", fallback=self.cfg.get("STORAGE", "storage_dir", fallback="data/storage/cmems")))
         self.replace_existing = self.cfg.getboolean("DOWNLOAD", "replace_same_name_files", fallback=True)
         self.file_patterns_raw = self.cfg.get("CMEMS_FORECAST", "file_name_patterns", fallback="*.nc")
 
