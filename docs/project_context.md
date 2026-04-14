@@ -106,6 +106,7 @@ hydromet_bulletin/
   - `test_download_creates_nc_files_in_storage_dir` — PASSED
   - `test_timeout_is_respected` — PASSED (проверяет логи retry, не wall-clock время)
 - `pytest.ini` создан в корне, маркер `integration` зарегистрирован.
+- Интеграционный тест GFS: `tests/test_integration_gfs.py` — создан (требует сеть).
 
 ### Не начато
 - Интеграционные тесты end-to-end (полный цикл forecast → docx → email).
@@ -122,13 +123,17 @@ hydromet_bulletin/
 - **Config**: `configparser.ConfigParser` (case-insensitive keys). Секции `CMEMS_*` и `GFS_*` разделены, общие `[DOWNLOAD]`/`[STORAGE]`/`[LOGGING]` — для CMEMS.
 - **Python интерпретатор**: использовать `py` (Python Launcher для Windows) — он автоматически находит установленный Python 3.x без привязки к конкретному пути.  
   **НЕ использовать просто `python`** — в системе он указывает на Microsoft Store stub.
-- **Запуск smoke-тестов**:
-  ```bash
+- **Запуск smoke-тестов** (PowerShell):
+  ```powershell
   py -m pytest tests/test_smoke_downloaders.py -v
   ```
-- **Запуск интеграционных тестов CMEMS** (требуют реальных credentials и сети):
-  ```bash
-  CMEMS_TEST_CONFIG=config.ini py -m pytest tests/test_integration_cmems.py -v -m integration -s
+- **Запуск интеграционных тестов CMEMS** (требуют реальных credentials и сети, PowerShell):
+  ```powershell
+  $env:CMEMS_TEST_CONFIG="config.ini"; py -m pytest tests/test_integration_cmems.py -v -m integration -s
+  ```
+- **Запуск интеграционных тестов GFS** (требуют реальных credentials и сети, PowerShell):
+  ```powershell
+  $env:GFS_TEST_CONFIG="config.ini"; py -m pytest tests/test_integration_gfs.py -v -m integration -s
   ```
 - **pytest.ini** зарегистрирован в корне проекта с маркером `integration`.
 - **CONFIG_PATH в тестах** читается через `os.environ.get("CMEMS_TEST_CONFIG", "config.example.ini")` — позволяет подставлять реальный `config.ini` без изменения кода.
@@ -156,7 +161,24 @@ hydromet_bulletin/
   - **Known limitation**: `ThreadPoolExecutor` не убивает зависший поток — поток `boto3` продолжает висеть в фоне после `future.result(timeout=N)`. Это ограничение `copernicusmarine` toolbox.
   - `test_timeout_is_respected` переработан: проверяет наличие строк `"timed out after 10s"` и `"retry attempts exhausted"` в логах, а не wall-clock время.
 
-- **Ветки**: активны `master` и `feature/data-ingestion`. Стратегия дальнейшего ветвления не определена.
+- **ОТКРЫТО: Несогласованная структура хранилища GFS**:
+  - CMEMS сохраняет файлы в `data/storage/` (финальное хранилище).
+  - GFS сохраняет в `data/work/gfs/` (рабочая директория) — несоответствие назначению.
+  - Часть файлов лежит в `data/work/gfs/` без подкаталогов, часть в `data/work/gfs/gfs/YYYYMMDD/` — двойной `gfs/gfs`, непоследовательно.
+  - `.idx`-файлы (индексы GRIB2) не фильтруются и засоряют хранилище.
+  - При параллельной загрузке возможна перезапись файлов с одинаковыми именами.
+  - **Целевая структура** (исправить в следующей задаче):
+    ```
+    data/
+    ├── work/cmems/        # временные файлы CMEMS
+    ├── work/gfs/          # временные файлы GFS
+    └── storage/
+        ├── cmems/YYYYMMDD/
+        └── gfs/YYYYMMDD/HHz/
+    ```
+  - **Что нужно исправить**: `gfs_downloader.py` (путь сохранения, фильтрация `.idx`), `config.example.ini` (`GFS_OUTPUT_DIR = data/storage/gfs`), привести `config.ini` в соответствие.
+
+- **Ветки**: активны `master` и `feature/bulletin-generation`. Стратегия дальнейшего ветвления не определена.
 
 
 ## 7. История ключевых коммитов
@@ -209,18 +231,25 @@ cat docs/project_context.md
 
 **Запуск тестов:**
 
+Терминал в Windsurf — **PowerShell**. Синтаксис env var: `$env:VAR="value"; command`.
+
 Smoke-тесты (без сети):
-```bash
+```powershell
 py -m pytest tests/test_smoke_downloaders.py -v
 ```
 
 Интеграционные тесты CMEMS (требуют сети и credentials):
-```bash
-CMEMS_TEST_CONFIG=config.ini py -m pytest tests/test_integration_cmems.py -v -m integration -s
+```powershell
+$env:CMEMS_TEST_CONFIG="config.ini"; py -m pytest tests/test_integration_cmems.py -v -m integration -s
+```
+
+Интеграционные тесты GFS (требуют сети):
+```powershell
+$env:GFS_TEST_CONFIG="config.ini"; py -m pytest tests/test_integration_gfs.py -v -m integration -s
 ```
 
 > Использовать `py` (Python Launcher для Windows), не `python` (Microsoft Store stub).  
-> `CONFIG_PATH` в тестах управляется через `CMEMS_TEST_CONFIG` env var.
+> Bash-синтаксис `VAR=value command` в PowerShell **не работает**.
 
 > Для Windsurf/Pyright интерпретатор задаётся через `.vscode/settings.json` (`python.defaultInterpreterPath`).
 > `pyrightconfig.json` хранит только настройки type checking и **не** должен содержать `pythonPath`/`pythonInterpreterPath`.
