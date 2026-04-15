@@ -25,7 +25,9 @@ gantt
     temp_statistics.py           :done, 2026-04-12, 1d
     wind_statistics.py           :done, 2026-04-12, 1d
     precip_statistics.py         :done, 2026-04-12, 1d
-    Валидация выходных данных    :2026-04-16, 2d
+    Валидация выходных данных    :done, 2026-04-15, 1d
+    Документация / process rules :done, 2026-04-15, 1d
+    Processing layer adaptation  :active, 2026-04-16, 3d
     section Генерация бюллетеня
     doc_builder.py (каркас)      :done, 2026-04-12, 1d
     Шаблон .docx (стили/секции) :2026-04-17, 2d
@@ -48,12 +50,24 @@ gantt
 | 2 | 12.04.2026 | ~5 ч | config.ini, CMEMS + GFS реально работают |
 | 3 | 13.04.2026 | ~3 ч | Рефакторинг config.ini, починка загрузчиков, smoke-тесты (GFS: 40/40, 138.9s) |
 | 4 | 14.04.2026 | ~4 ч | Интеграционные тесты CMEMS (3/3 PASSED), настройка Windsurf/Pyright, интеграционные тесты GFS |
+| 5 | 14–15.04.2026 | ~2 ч | Архитектурный анализ pipeline, выявлены риски валидации, согласован контракт validate_outputs.py |
+| 6 | 15.04.2026 | ~3 ч | validate_outputs.py v1 (14/14 passed), guard-call в forecast_*.py, docs/process rules cleanup |
 
-## Общий прогресс: ~45%
+## Общий прогресс: ~55%
 
 ```mermaid
 pie
     title Выполнено vs Осталось
-    "Выполнено" : 45
-    "Осталось"  : 55
+    "Выполнено" : 55
+    "Осталось"  : 45
 ```
+
+## Deferred tasks
+
+| # | Задача | Приоритет | Этап |
+|---|--------|-----------|------|
+| 1 | GFS GRIB2 → NetCDF conversion / preprocessing | medium | После Processing layer adaptation |
+| 2 | Normalizing/preprocessing layer для GFS | medium | После Processing layer adaptation |
+| 3 | Downstream validation перед `doc_builder.py` | low | После validate_outputs v1 |
+| 4 | Soft quality rules (физ. диапазоны, NaN ratio, sanity checks) | low | После MVP validate_outputs |
+| 5 | Интеграционные тесты end-to-end (forecast → docx → email) | high | После Генерации бюллетеня |
