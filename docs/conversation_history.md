@@ -995,3 +995,28 @@ PDF — не лучший вариант. Я смогу его прочитат�
 - Исправить архитектуру хранилища GFS: `gfs_downloader.py` (путь сохранения, фильтрация `.idx`), `config.example.ini` (`GFS_OUTPUT_DIR = data/storage/gfs`), привести `config.ini` в соответствие.
 - Добавить логику skip-if-exists для ускорения повторных запусков тестов.
 - Фильтрация `.idx`-файлов при скачивании.
+
+---
+
+## Сессия 5 — 14.04.2026
+
+### Что сделано
+
+#### Стабилизация CMEMS загрузки (ключевая проблема)
+
+- Подтверждено: основная причина падений — путь `copernicusmarine.get()` через S3 CloudFerro (`RetriesExceededError` / read-timeout).
+- В `utils/downloaders/cmems_downloader.py` добавлен fallback:
+  - первичный путь остаётся `copernicusmarine.get()`;
+  - при S3 retry/read-timeout ошибках автоматически выполняется `copernicusmarine.subset()` (HTTP путь).
+- Для `subset()` используется bbox из `[BoundingBox]` и окно загрузки на `forecast_days`.
+- Сохранены существующие механизмы hard-timeout (`ThreadPoolExecutor`) и retry с exponential backoff.
+- Добавлена настройка `cmems_enable_subset_fallback = true` в `[CMEMS_SOURCES]` (`config.example.ini`) для явного управления fallback.
+
+#### Валидация после правок
+
+- Smoke-тесты загрузчиков проходят: `py -m pytest tests/test_smoke_downloaders.py -q` → **3 passed**.
+- Линтер-ошибок по изменённым файлам нет.
+
+### Следующий шаг
+
+- Прогнать `tests/test_integration_cmems.py` на реальном `config.ini` и проверить, что при S3-ошибке срабатывает `subset()` и формируются `.nc` в `data/storage/cmems`.
