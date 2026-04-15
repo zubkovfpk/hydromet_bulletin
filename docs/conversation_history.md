@@ -934,7 +934,7 @@ PDF — не лучший вариант. Я смогу его прочитат�
 
 Лучшие варианты:
 
-1. project_context.md в корне репозитория — оптимально.
+1. `docs/project_context.md` — canonical source (исторически раньше упоминался root `project_context.md`, теперь этот путь deprecated).
 Файл с разделами:
 
 структура проекта и назначение каждого файла
@@ -945,13 +945,13 @@ PDF — не лучший вариант. Я смогу его прочитат�
 
 известные проблемы и как решались
 
-Я его буду читать через cat project_context.md в начале каждой сессии — и сразу в контексте.
+Для старта сессии читать `cat docs/project_context.md`.
 
 2. Память (Perplexity Spaces или системные воспоминания) — для персональных предпочтений и стиля работы. Уже частично работает — я знаю твой стек и уровень.
 
 3. CHANGELOG.md — дополнительно, для хронологии изменений по файлам.
 
-Рекомендую: создай project_context.md прямо сейчас — дай промпт агенту Cursor, он соберёт его из текущей структуры проекта автоматически.
+Рекомендую: поддерживать единый файл `docs/project_context.md` и избегать дублирования контекста в корне репозитория.
 
 ---
 
@@ -1020,3 +1020,134 @@ PDF — не лучший вариант. Я смогу его прочитат�
 ### Следующий шаг
 
 - Прогнать `tests/test_integration_cmems.py` на реальном `config.ini` и проверить, что при S3-ошибке срабатывает `subset()` и формируются `.nc` в `data/storage/cmems`.
+
+---
+
+## Сессия 6 — 15.04.2026
+
+### Контекст
+
+Ingestion-слой закрыт. Переход к этапу «Обработка данных / Валидация выходных данных». Принято решение: сначала зафиксировать архитектурный анализ и обновить документацию, затем готовить ТЗ и реализацию `validate_outputs.py`.
+
+---
+
+### Архитектурный анализ pipeline (Windsurf)
+
+#### Схема движения данных
+
+```
+fetch_inputs.py  (ingestion layer — закрыт)
+    ├── GFSDownloader.download()   →  data/GFS/<date>/<step>/*.nc
+    └── CMEMSDownloader.download() →  data/CMEMS/*.nc
+
+forecast_morning/evening.py  (оркестратор)
+    │
+    ├─ [1] collect_meteo_data()
+    │       читает data/GFS → маскирует по shp → агрегирует 3ч→сутки
+    │       возвращает: dict[str, ndarray(nx, ny, n_days)]
+    │         Temp(nx,ny,10), Rain/Snow/Wind_Gust/Vis/...(nx,ny,5)
+    │
+    ├─ [2] collect_wave_data()
+    │       читает data/CMEMS → обрезает bbox → маскирует по shp
+    │       возвращает: (Wave: ndarray(nx,ny,5), start_date, end_date)
+    │
+    │    ← ОПТИМАЛЬНАЯ ТОЧКА ВАЛИДАЦИИ →
+    │
+    ├─ [3] Inline-вычисления в forecast_*.py (не вынесены в utils)
+    │       gust    = np.nanmax(meteo["Wind_Gust"][:,:,n])
+    │       vis_min = np.nanmin(meteo["Vis"][:,:,n]) / 1000
+    │       wave_min/max = np.nanmin/nanmax(HWave[:,:,n])
+    │
+    ├─ [4] wind_statistics / precip_statistics / temp_statistics_*
+    │
+    └─ [5] create_bulletin_doc(days_content) → .docx
+```
+
+---
+
+### Найденные architectural / operational risks
+
+#### Выходы `collect_meteo_data` — нет ни одной проверки
+
+> «Если `subdirs` пуст (нет GFS-файлов) — `np.stack([])` → `ValueError` без внятного сообщения.»
+
+> «Отсутствие переменной в NC-файле → необработанный `KeyError`. Разные сетки в разных файлах → `np.stack` упадёт с несовместимыми формами.»
+
+> «Физический диапазон не проверяется. Temp=0 K, Wind=500 м/с пройдут тихо. Доля NaN не проверяется — если маска дала >95% NaN, данные некорректны, но дальше "работает".»
+
+#### Выходы `collect_wave_data` — три скрытые бомбы
+
+> «`nc_files` пуст → `nc_files[0]` → `IndexError`.»
+
+> «`start_date`/`end_date` = `None` — в `forecast_*.py` строка `int((end_date - start_date).days)` → `TypeError`.»
+
+> «`H_Wave` инициализирован нулями, не `NaN`: незаполненные временны́е слои дают `wave_min=0.0`, а не `NaN`; статистика молча искажается.»
+
+#### Модули статистики — три потенциальных краша
+
+> «`temp_statistics`: `np.quantile(valid_first, ...)` — если `valid_first` пуст (весь срез — NaN) → **`ValueError`**.»
+
+> «`wind_statistics`: `len(r_idx) == 0` → деление на ноль в `percents = counts / len(r_idx)`.»
+
+> «`precip_statistics`: `total_valid == 0` → деление на ноль в `p_rain = ... / total_valid`.»
+
+#### Inline-вычисления в `forecast_*.py` — тихое повреждение данных
+
+> «`gust = int(round(float(np.nanmax(meteo["Wind_Gust"][:, :, n]))))` — если весь срез NaN, `np.nanmax` вернёт `nan` → `int(round(nan))` → **`ValueError`**. Аналогично `vis_min/vis_max` и `wave_min/wave_max`.»
+
+#### `doc_builder.py` — полностью «доверяет» входным строкам
+
+> «Невозможные диапазоны (`wave_min > wave_max`, отрицательная видимость) в итоговый `.docx` проходят без каких-либо предупреждений.»
+
+---
+
+### Согласованная точка вставки `validate_outputs.py`
+
+**Лучшее место — между слоем [2] и слоем [3]**: сразу после вызовов `collect_meteo_data()` и `collect_wave_data()`, до любой статистики и inline-вычислений.
+
+Обоснование:
+
+> «Единая точка: оба загрузчика проходят проверку до того, как их данные разойдутся по нескольким срезам `[:,:,n]`. Ненавязчиво: статистические модули остаются "чистыми функциями" без защитного кода. Аддитивно: `validate_outputs.py` — новый файл в `utils/`, ни один существующий файл не меняется (кроме добавления двух вызовов в `forecast_*.py`).»
+
+Контракт зафиксирован в `docs/project_context.md`, раздел `## 8. Validate Outputs Contract` (согласован, реализация не начата).
+
+---
+
+### Прочие правки сессии
+
+- `config.example.ini`: добавлена отсутствовавшая секция `[CMEMS_STORAGE]` (drift с рабочим `config.ini`). Коммит: `9888ea8`.
+
+---
+
+### Выявленные process-level проблемы (15.04.2026)
+
+#### 1. Дублирование `project_context.md`
+
+В репозитории одновременно существовали два файла контекста:
+- `project_context.md` — в корне репозитория (создан на раннем этапе)
+- `docs/project_context.md` — актуальный, обновлявшийся в последних сессиях
+
+**Почему это опасно для multi-agent workflow.** Windsurf и Cursor в рамках одного проекта могут читать разные файлы в зависимости от того, с какого каталога агент начинает работу. Результат: один агент работает на устаревшем контексте, не знает об актуальных архитектурных решениях и договорённостях. При записи оба агента могут перезаписать результаты друг друга в разные файлы.
+
+**Принятое решение:**
+- `docs/project_context.md` — **единственный** canonical source of truth.
+- Корневой `project_context.md` удалён пользователем.
+- Правило зафиксировано в `docs/project_context.md`, раздел `## 11. Process Rules`, подраздел `11.1`.
+
+**Технический merge контента** (если корневой файл содержал уникальные записи) выполняется **отдельно инструментом Cursor**; статус: не завершён.
+
+#### 2. Нарушение branch discipline
+
+Feature-коммиты по этапу `validate_outputs.py` и bulletin generation попадали в `master` напрямую, хотя для этого этапа выделена ветка `feature/bulletin-generation`.
+
+**Принятое решение:**
+- `feature/bulletin-generation` — единственная рабочая ветка для текущего этапа.
+- Прямые feature-коммиты в `master` запрещены.
+- Merge в `master` только через `git merge --no-ff` после согласования с пользователем.
+- Branch policy зафиксирована в `docs/project_context.md`, раздел `11.2`, и в `windsurf.rules.md`, раздел `## 10`.
+
+#### Изменения, внесённые в рамках этой фиксации
+
+- `docs/project_context.md` — обновлён раздел `1.1`; добавлен раздел `## 11. Process Rules` (11.1 Canonical paths / 11.2 Branch policy / 11.3 Deferred-task logging).
+- `windsurf.rules.md` — добавлены разделы `## 9` (startup rules) и `## 10` (branch discipline).
+- `docs/conversation_history.md` — добавлена эта запись.
