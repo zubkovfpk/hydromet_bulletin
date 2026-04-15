@@ -1035,3 +1035,128 @@ PDF — не лучший вариант. Я смогу его прочитат�
 **Уточнение**: явная инструкция «исправить `config.ini`» в тексте сообщения пользователя **не является разрешением** выполнить команду. Разрешение — только нажатая кнопка **Да** в интерактивной форме подтверждения. Форму показывать **всегда**, без исключений, перед любой PowerShell-командой, затрагивающей `config.ini`.
 
 Правило обновлено в `docs/project_context.md`, раздел «Стиль работы».
+
+---
+
+## Сессия 6 — 15.04.2026
+
+### Контекст
+
+Ingestion-слой закрыт. Переход к этапу «Обработка данных / Валидация выходных данных». Принято решение: сначала зафиксировать архитектурный анализ и обновить документацию, затем готовить ТЗ и реализацию `validate_outputs.py`.
+
+---
+
+### Архитектурный анализ pipeline (Windsurf)
+
+#### Схема движения данных
+
+```
+fetch_inputs.py  (ingestion layer — закрыт)
+    ├── GFSDownloader.download()   →  data/GFS/<date>/<step>/*.nc
+    └── CMEMSDownloader.download() →  data/CMEMS/*.nc
+
+forecast_morning/evening.py  (оркестратор)
+    │
+    ├─ [1] collect_meteo_data()
+    │       читает data/GFS → маскирует по shp → агрегирует 3ч→сутки
+    │       возвращает: dict[str, ndarray(nx, ny, n_days)]
+    │         Temp(nx,ny,10), Rain/Snow/Wind_Gust/Vis/...(nx,ny,5)
+    │
+    ├─ [2] collect_wave_data()
+    │       читает data/CMEMS → обрезает bbox → маскирует по shp
+    │       возвращает: (Wave: ndarray(nx,ny,5), start_date, end_date)
+    │
+    │    ← ОПТИМАЛЬНАЯ ТОЧКА ВАЛИДАЦИИ →
+    │
+    ├─ [3] Inline-вычисления в forecast_*.py (не вынесены в utils)
+    │       gust    = np.nanmax(meteo["Wind_Gust"][:,:,n])
+    │       vis_min = np.nanmin(meteo["Vis"][:,:,n]) / 1000
+    │       wave_min/max = np.nanmin/nanmax(HWave[:,:,n])
+    │
+    ├─ [4] wind_statistics / precip_statistics / temp_statistics_*
+    │
+    └─ [5] create_bulletin_doc(days_content) → .docx
+```
+
+---
+
+### Найденные architectural / operational risks
+
+#### Выходы `collect_meteo_data` — нет ни одной проверки
+
+> «Если `subdirs` пуст (нет GFS-файлов) — `np.stack([])` → `ValueError` без внятного сообщения.»
+
+> «Отсутствие переменной в NC-файле → необработанный `KeyError`. Разные сетки в разных файлах → `np.stack` упадёт с несовместимыми формами.»
+
+> «Физический диапазон не проверяется. Temp=0 K, Wind=500 м/с пройдут тихо. Доля NaN не проверяется — если маска дала >95% NaN, данные некорректны, но дальше "работает".»
+
+#### Выходы `collect_wave_data` — три скрытые бомбы
+
+> «`nc_files` пуст → `nc_files[0]` → `IndexError`.»
+
+> «`start_date`/`end_date` = `None` — в `forecast_*.py` строка `int((end_date - start_date).days)` → `TypeError`.»
+
+> «`H_Wave` инициализирован нулями, не `NaN`: незаполненные временны́е слои дают `wave_min=0.0`, а не `NaN`; статистика молча искажается.»
+
+#### Модули статистики — три потенциальных краша
+
+> «`temp_statistics`: `np.quantile(valid_first, ...)` — если `valid_first` пуст (весь срез — NaN) → **`ValueError`**.»
+
+> «`wind_statistics`: `len(r_idx) == 0` → деление на ноль в `percents = counts / len(r_idx)`.»
+
+> «`precip_statistics`: `total_valid == 0` → деление на ноль в `p_rain = ... / total_valid`.»
+
+#### Inline-вычисления в `forecast_*.py` — тихое повреждение данных
+
+> «`gust = int(round(float(np.nanmax(meteo["Wind_Gust"][:, :, n]))))` — если весь срез NaN, `np.nanmax` вернёт `nan` → `int(round(nan))` → **`ValueError`**. Аналогично `vis_min/vis_max` и `wave_min/wave_max`.»
+
+#### `doc_builder.py` — полностью «доверяет» входным строкам
+
+> «Невозможные диапазоны (`wave_min > wave_max`, отрицательная видимость) в итоговый `.docx` проходят без каких-либо предупреждений.»
+
+---
+
+### Согласованная точка вставки `validate_outputs.py`
+
+**Лучшее место — между слоем [2] и слоем [3]**: сразу после вызовов `collect_meteo_data()` и `collect_wave_data()`, до любой статистики и inline-вычислений.
+
+Обоснование (Windsurf):
+
+> «Единая точка: оба загрузчика проходят проверку до того, как их данные разойдутся по нескольким срезам `[:,:,n]`. Ненавязчиво: статистические модули остаются "чистыми функциями" без защитного кода. Аддитивно: `validate_outputs.py` — новый файл в `utils/`, ни один существующий файл не меняется (кроме добавления двух вызовов в `forecast_*.py`).»
+
+Предлагаемый контракт (согласован, реализация не начата):
+
+```python
+# utils/validate_outputs.py  — контракт (не реализован)
+
+class ValidationError(RuntimeError): ...   # критично — стопит пайплайн
+class ValidationWarning(UserWarning): ...  # некритично — пишем в лог
+
+def validate_meteo(meteo: dict) -> None:
+    # 1. Все ключи присутствуют
+    # 2. Shape: Temp → (nx,ny,10), остальные → (nx,ny,5)
+    # 3. NaN-доля < порог (~90%) для каждой переменной
+    # 4. Физические диапазоны: Temp ∈ (-80,+60)°C, Wind ∈ (0,80) м/с, и т.д.
+
+def validate_wave(wave: np.ndarray,
+                  start_date: datetime | None,
+                  end_date:   datetime | None) -> None:
+    # 1. start_date и end_date не None
+    # 2. Shape: (nx, ny, 5)
+    # 3. Нет чисто нулевых слоёв (признак незаполненного H_Wave)
+    # 4. Wave ∈ (0, 20) м; NaN-доля < порог
+```
+
+---
+
+### Прочие правки сессии
+
+- `config.example.ini`: добавлена отсутствовавшая секция `[CMEMS_STORAGE]` (drift с рабочим `config.ini`). Коммит: `9888ea8`.
+
+---
+
+### Следующие задачи
+
+- Подготовить ТЗ для Cursor: реализация `utils/validate_outputs.py` по согласованному контракту.
+- Добавить вызовы `validate_meteo()` и `validate_wave()` в `forecast_morning.py` и `forecast_evening.py` (после явного подтверждения).
+- Написать тесты `tests/test_validate_outputs.py`.

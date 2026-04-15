@@ -55,6 +55,7 @@ hydromet_bulletin/
      __init__.py
      collect_meteo_data.py      разбор GFS GRIB2, маскировка по shp, расчёт полей  done
      collect_wave_data.py       разбор CMEMS NetCDF (hs/tp/dp), агрегация           done
+     validate_outputs.py        валидация выходов collect_* перед statistics-слоем   planned
      doc_builder.py             конструктор Word-документа (заголовки, стили)       done
      email_sender.py            отправка .docx по SMTP SSL/TLS (порт 465)           done
      precip_statistics.py       статистика осадков (freeze_rain, ice_pell, rain, snow) done
@@ -83,6 +84,7 @@ hydromet_bulletin/
 | `[CMEMS_SOURCES]` | URL, product_path, dataset_id, динамическая маска пути, auth (token/password) |
 | `[CMEMS_FORECAST]` | Горизонт прогноза, файлов на цикл, временны́е окна, glob-паттерны имён файлов |
 | `[CMEMS_VALIDATION]` | Схема, обязательные переменные, bbox, флаг обрезки |
+| `[CMEMS_STORAGE]` | `CMEMS_WORK_DIR` (рабочая директория), `CMEMS_OUTPUT_DIR` (директория вывода CMEMS) |
 | `[GFS_SOURCES]` | NOMADS filter URL, шаблон пути модели, циклы (00z/06z/12z/18z) |
 | `[GFS_DOWNLOAD]` | Расписание, timeout, retry, задержка |
 | `[GFS_FORECAST]` | Шаги прогноза (hours_start/end/step), переменные и уровни для filter URL |
@@ -105,6 +107,11 @@ hydromet_bulletin/
 - Длительная стадия `Listing files on remote server...` в `copernicusmarine.get()` для некоторых запусков (зависит от сети/удалённого сервиса).
 - Накопление статистики по стабильности режимов `auto` vs `subset` в реальном cron-цикле.
 
+### Согласовано на текущую сессию (не реализовано)
+- **`utils/validate_outputs.py`**: архитектурный контракт согласован (см. раздел 9). Реализация не начата. Точка вставки: после `collect_meteo_data()` и `collect_wave_data()`, до statistics-слоя.
+- **Вызовы валидации** в `forecast_morning.py` / `forecast_evening.py`: ожидают реализации модуля.
+- **`tests/test_validate_outputs.py`**: будет создан вместе с модулем.
+
 ### Не начато
 - Интеграционные тесты end-to-end (полный цикл forecast → docx → email).
 - Стратегия ветвления: решить, вводить ли ветку `develop` или работать в `feature/*` → `master`.
@@ -120,6 +127,29 @@ hydromet_bulletin/
 - **Config**: `configparser.ConfigParser` (case-insensitive keys). Секции `CMEMS_*` и `GFS_*` разделены, общие `[DOWNLOAD]`/`[STORAGE]`/`[LOGGING]` — для CMEMS.
 
 
+## 9. Архитектурные решения: validate_outputs.py
+
+### Agreed decisions
+
+- **Назначение**: `validate_outputs.py` — модуль для проверки результатов `collect_meteo_data()` и `collect_wave_data()`. Не является частью ingestion-слоя, не проверяет сами файлы-источники.
+- **Точка вставки**: сразу после вызовов `collect_*` в `forecast_morning.py` / `forecast_evening.py`, до любых statistics-модулей и inline-вычислений.
+- **Принцип аддитивности**: новый файл `utils/validate_outputs.py`; существующие модули (`collect_*`, `wind_statistics`, `precip_statistics`, `temp_statistics`, `doc_builder`) не меняются.
+- **Уровни серьёзности**:
+  - `ValidationError(RuntimeError)` — критичная ошибка, останавливает пайплайн;
+  - `ValidationWarning(UserWarning)` — некритичная аномалия, пишется в лог, выполнение продолжается.
+- **Публичный контракт** (согласован, реализация не начата):
+  - `validate_meteo(meteo: dict) -> None` — проверяет наличие ключей, формы массивов `(nx,ny,n_days)`, долю NaN, физические диапазоны.
+  - `validate_wave(wave: ndarray, start_date, end_date) -> None` — проверяет `start_date`/`end_date` не `None`, форму `(nx,ny,5)`, отсутствие нулевых незаполненных слоёв, диапазон высоты волны.
+
+### Deferred tasks / Next phases
+
+- **Конвертация GFS из GRIB2 в NetCDF**: `GFS_ENABLE_CONVERSION_TO_NETCDF` уже есть в `[GFS_VALIDATION]` как флаг. Реализация конвертации — отдельная задача, не входит в v1 `validate_outputs.py`. Необходима при переходе на unified NetCDF-pipeline.
+- **Downstream-проверка day-level statistics**: опциональная функция `validate_day_stats(day: dict) -> None` перед `create_bulletin_doc()` — проверяет `wind_min ≤ wind_max`, `vis_min ≤ vis_max`, `wave_min ≤ wave_max`. Отложена на после v1.
+- **Normalizing/preprocessing step для GFS**: если прямой переход от download-layer (`gfs_downloader.py` → GRIB2) к `collect_meteo_data()` (ожидает NetCDF) останется неудобным — потребуется отдельный preprocessing модуль. Не входит в текущий scope.
+- **Рефакторинг inline-вычислений из `forecast_*.py`**: `np.nanmax(Wind_Gust)`, `np.nanmin/nanmax(Vis)`, `np.nanmin/nanmax(HWave)` — логика разбросана по оркестратору. Вынесение в отдельные helper-функции с NaN-защитой рассматривается как следующий шаг после `validate_outputs.py`.
+
+---
+
 ## 6. Известные проблемы
 
 - **CMEMS: нестабильность S3-пути в `copernicusmarine.get()` (частично mitigated)**.
@@ -133,7 +163,8 @@ hydromet_bulletin/
 ## 7. История ключевых коммитов
 
 ```
-5d97490 (HEAD -> master) fix(cmems): add retry + timeout protection to CMEMSDownloader
+9888ea8 (HEAD -> master) chore(config): add missing [CMEMS_STORAGE] section to config.example.ini
+5d97490 fix(cmems): add retry + timeout protection to CMEMSDownloader
 0cb3678 (origin/master) feat: data ingestion layer — CMEMS + GFS downloaders
 e478c1d (origin/feature/data-ingestion, feature/data-ingestion) fix(fetch_inputs): update required sections to CMEMS_*/GFS_* pattern
 a161f2c test(smoke): fix attribute names after gfs_downloader refactor
@@ -159,8 +190,7 @@ d63ae3a Baseline hydromet bulletin project (Python + Docker)
 ```
 
 **Статус веток:**
-- `HEAD -> master` — локальная ветка, 1 коммит впереди origin (`5d97490` не запушен)
-- `origin/master` — последний запушенный коммит `0cb3678`
+- `HEAD -> master` == `origin/master` — синхронизированы (последний коммит `9888ea8` запушен)
 - `feature/data-ingestion` / `origin/feature/data-ingestion` — feature-ветка, синхронизирована
 
 
