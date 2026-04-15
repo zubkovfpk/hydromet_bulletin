@@ -5,10 +5,12 @@ import configparser
 import logging
 import os
 import sys
+import tempfile
 import types
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -38,7 +40,7 @@ from utils.downloaders.cmems_downloader import CMEMSDownloader  # noqa: E402
 
 def _load_example_config() -> configparser.ConfigParser:
     cfg = configparser.ConfigParser()
-    read = cfg.read(CONFIG_PATH, encoding="utf-8")
+    read = cfg.read(CONFIG_PATH, encoding="utf-8-sig")
     if not read:
         raise FileNotFoundError(f"Cannot read config: {CONFIG_PATH}")
     return cfg
@@ -130,6 +132,60 @@ class TestCMEMSIntegration(unittest.TestCase):
             any("retry attempts exhausted" in msg for msg in captured),
             f"Expected 'retry attempts exhausted' in logs; got:\n{joined}",
         )
+
+    @pytest.mark.integration
+    def test_fallback_to_subset_on_s3_retry_error(self) -> None:
+        cfg_local = configparser.ConfigParser()
+        cfg_local.read_dict({s: dict(self.cfg[s]) for s in self.cfg.sections()})
+        if not cfg_local.has_section("CMEMS_STORAGE"):
+            cfg_local.add_section("CMEMS_STORAGE")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out_dir = Path(tmpdir)
+            cfg_local["CMEMS_STORAGE"]["CMEMS_OUTPUT_DIR"] = str(out_dir)
+            cfg_local["CMEMS_STORAGE"]["CMEMS_WORK_DIR"] = str(out_dir / "work")
+            cfg_local["DOWNLOAD"]["download_retry_count"] = "1"
+            cfg_local["DOWNLOAD"]["download_timeout_seconds"] = "30"
+            cfg_local["CMEMS_SOURCES"]["cmems_enable_subset_fallback"] = "true"
+
+            events: list[str] = []
+
+            fake_module = types.SimpleNamespace()
+
+            def _fake_login(**kwargs):
+                return None
+
+            def _fake_get(**kwargs):
+                events.append("get")
+                raise RuntimeError(
+                    "RetriesExceededError: Max Retries Exceeded while reading "
+                    "s3.waw3-1.cloudferro.com endpoint"
+                )
+
+            def _fake_subset(**kwargs):
+                events.append("subset")
+                output_directory = Path(kwargs["output_directory"])
+                output_directory.mkdir(parents=True, exist_ok=True)
+                output_path = output_directory / kwargs.get("output_filename", "cmems_subset_test.nc")
+                output_path.write_bytes(b"fake nc payload")
+                return output_path
+
+            fake_module.login = _fake_login
+            fake_module.get = _fake_get
+            fake_module.subset = _fake_subset
+
+            downloader = CMEMSDownloader(cfg_local, logger=self.logger)
+            with patch.dict(sys.modules, {"copernicusmarine": fake_module}):
+                result = downloader.download("20260413")
+
+            self.assertTrue(result, "download() should succeed via subset() fallback")
+            self.assertIn("get", events, "Expected get() to be called before fallback")
+            self.assertIn("subset", events, "Expected subset() fallback to be called")
+            self.assertGreater(
+                len(list(out_dir.rglob("*.nc"))),
+                0,
+                "Expected fallback subset() to create at least one .nc file",
+            )
 
 
 if __name__ == "__main__":

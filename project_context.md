@@ -94,15 +94,16 @@ hydromet_bulletin/
 ## 4. Статус разработки
 
 ### Реализовано и работает
-- **CMEMSDownloader**: `__init__` (секции `CMEMS_SOURCES`/`CMEMS_FORECAST`), `download()` с retry + exponential backoff + `ThreadPoolExecutor` hard timeout, `_ensure_login()`.
+- **CMEMSDownloader**: `download()` с retry + exponential backoff + hard-timeout; добавлены режимы `cmems_download_mode=auto|get|subset`, fallback `get() -> subset()` при S3-ошибках и timeout-защита для `copernicusmarine.login()`.
 - **GFSDownloader**: `__init__` (секции `GFS_*`), `download(date, cycle)` с retry + HTTP streaming через NOMADS filter URL. Smoke-тест: 40/40 файлов, 138.9 с.
 - **Smoke-тесты**: `tests/test_smoke_downloaders.py` — все зелёные (3 теста).
+- **Интеграционные тесты CMEMS**: `tests/test_integration_cmems.py` созданы и проходят (реальный `config.ini`: 3/3 PASS; отдельный тест fallback `get()->subset`: PASS).
 - **utils-слой**: `collect_meteo_data`, `collect_wave_data`, `doc_builder`, `email_sender`, `precip_statistics`, `temp_statistics`, `wind_statistics` — реализованы (оригинальная кодовая база, конвертирована из MATLAB).
-- **fetch_inputs.py**: точка входа с CLI (`--config`, `--date`, `--cycle`), валидация секций конфига.
+- **fetch_inputs.py**: точка входа с CLI (`--config`, `--date`, `--cycle`), валидация секций конфига; устранён риск тяжёлого старта за счёт lazy-импортов в `utils/__init__.py`.
 
 ### В работе
-- Интеграционный тест CMEMS (`tests/test_integration_cmems.py` — не создан).
-- Анализ и устранение причины падения реальной загрузки CMEMS (см. раздел 6).
+- Длительная стадия `Listing files on remote server...` в `copernicusmarine.get()` для некоторых запусков (зависит от сети/удалённого сервиса).
+- Накопление статистики по стабильности режимов `auto` vs `subset` в реальном cron-цикле.
 
 ### Не начато
 - Интеграционные тесты end-to-end (полный цикл forecast → docx → email).
@@ -121,10 +122,10 @@ hydromet_bulletin/
 
 ## 6. Известные проблемы
 
-- **Интеграционный тест CMEMS падает по таймауту** (`boto3.exceptions.RetriesExceededError: Max Retries Exceeded`, elapsed 45 мин).
-  - Причина: `copernicusmarine.get()` скачивает сырые файлы через S3 (`s3.waw3-1.cloudferro.com`). Внутренний S3 read timeout = 2 с. S3-эндпоинт CloudFerro оптимизирован для доступа изнутри облака, из внешней сети соединение постоянно обрывается.
-  - Статус: в анализе. Кандидаты на fix: переключиться на `copernicusmarine.subset()` (HTTP/ERDDAP, не S3) или увеличить S3 timeout через `~/.aws/config`.
-  - Workaround добавлен в коммите `fix(cmems)`: retry + ThreadPoolExecutor wrapper.
+- **CMEMS: нестабильность S3-пути в `copernicusmarine.get()` (частично mitigated)**.
+  - Причина: `get()` использует S3 (`s3.waw3-1.cloudferro.com`), где из внешней сети возможны read-timeout/обрывы и длинный metadata listing.
+  - Что сделано: добавлены режимы `cmems_download_mode` (`auto|get|subset`), fallback `get() -> subset()` при S3 retry/read-timeout, hard-timeout на `login()` и существующий retry/backoff.
+  - Текущий статус: интеграционные тесты проходят, но для production-стабильности рекомендован режим `cmems_download_mode=subset` (HTTP-only) в нестабильной сети.
 
 - **Ветки**: активны `master` и `feature/data-ingestion`. Стратегия дальнейшего ветвления не определена.
 
