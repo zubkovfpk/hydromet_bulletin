@@ -144,6 +144,12 @@ hydromet_bulletin/
   - **Known limitation**: `ThreadPoolExecutor` не убивает зависший поток — поток `boto3` продолжает висеть в фоне после `future.result(timeout=N)`. Это ограничение `copernicusmarine` toolbox.
   - `test_timeout_is_respected` переработан: проверяет наличие строк `"timed out after 10s"` и `"retry attempts exhausted"` в логах, а не wall-clock время.
 
+- **РЕШЕНО: Несогласованная структура хранилища GFS**:
+  - Было: файлы сохранялись в `data/work/gfs/` напрямую и в `data/work/gfs/gfs/YYYYMMDD/` (двойной путь).
+  - `.idx`-файлы не фильтровались; не было логики skip-if-exists.
+  - Fix: `gfs_downloader.py` теперь сохраняет в `storage_dir / YYYYMMDD / HHz /`; добавлены skip-if-exists и очистка `.idx`; `config.ini` / `config.example.ini` приведены к `data/storage/gfs`.
+  - Реальная структура `data/storage/gfs/YYYYMMDD/HHz/` соответствует ожидаемой.
+
 - **Ветки**: активны `master` и `feature/data-ingestion`. Стратегия дальнейшего ветвления не определена.
 
 
@@ -216,6 +222,6 @@ CMEMS_TEST_CONFIG=config.ini \
 **Стиль работы:**
 - Промпты для агентов Cursor/Windsurf вместо листингов кода — описывать задачу, не диктовать реализацию.
 - Коммиты через Git Bash в формате Conventional Commits (`feat:`, `fix:`, `chore:`, `docs:`, `test:`).
-- Не трогать `config.ini` (secrets). Шаблон — только `config.example.ini` с `CHANGE_ME`.
+- **`config.ini` (secrets)** — не изменять без явного кнопочного подтверждения. Если задача требует правки `config.ini`: перед запуском PowerShell-команды показать форму с кнопками «Да» / «Нет». **Важно**: явная инструкция «исправить `config.ini`» в тексте сообщения ≠ разрешение выполнить команду. Разрешение — только нажатая кнопка **Да**. При «Нет» — описать что и как пользователь должен внести вручную. Шаблон — только `config.example.ini` с `CHANGE_ME`.
 - Проверять имена секций конфига перед правкой загрузчиков: `CMEMS_SOURCES`, `CMEMS_FORECAST`, `GFS_SOURCES`, `GFS_DOWNLOAD`, `GFS_FORECAST`, `GFS_STORAGE`.
 - Smoke-тесты: см. блок «Запуск тестов» выше.
