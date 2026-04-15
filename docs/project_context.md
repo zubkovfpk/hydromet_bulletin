@@ -189,7 +189,69 @@ d63ae3a Baseline hydromet bulletin project (Python + Docker)
 - `feature/data-ingestion` / `origin/feature/data-ingestion` — feature-ветка, синхронизирована
 
 
-## 8. Инструкция для AI-ассистента
+## 8. Validate Outputs Contract (agreed current session)
+
+### 8.1 Статус и границы
+
+- **Implemented:** ingestion-слой (`fetch_inputs.py`, `utils/downloaders/*`) завершён; текущий pipeline расчёта бюллетеней работает на `collect_meteo_data()` и `collect_wave_data()`.
+- **Agreed for current session:** зафиксирован planned API и scope для `utils/validate_outputs.py` (реализация пока не начата).
+- **Proposed / deferred:** фактическая интеграция guard-вызовов в `forecast_morning.py` / `forecast_evening.py` и unit-тесты в отдельной следующей задаче.
+
+### 8.2 Planned API для `utils/validate_outputs.py`
+
+`validate_outputs.py v1` валидирует **результаты выполнения** `collect_meteo_data()` и `collect_wave_data()`:
+
+- `class ValidationError(Exception)` — базовое исключение валидации.
+- `class StructureValidationError(ValidationError)` — отсутствуют обязательные ключи, неожиданный тип/размерность.
+- `class ShapeValidationError(ValidationError)` — несовместимые shape/time-depth/spatial dimensions.
+- `class DataQualityValidationError(ValidationError)` — all-NaN day layers, non-finite значения, критичные quality-аномалии.
+- `class TemporalValidationError(ValidationError)` — несогласованные `start_date/end_date` и временная неконсистентность.
+
+Функции:
+
+- `validate_meteo_output(meteo: dict, strict: bool = True) -> list[str]`
+- `validate_wave_output(wave: np.ndarray, start_date, end_date, strict: bool = True) -> list[str]`
+- `validate_pipeline_outputs(meteo: dict, wave: np.ndarray, start_date, end_date, strict: bool = True) -> list[str]`
+- `assert_valid_for_bulletin(...) -> None`
+- `summarize_validation(warnings: list[str]) -> str`
+
+Режимы:
+
+- `strict=True`: нарушения уровня error приводят к исключениям и остановке шага.
+- `strict=False`: нарушения фиксируются как warning-сообщения, возвращаются списком для логирования/мониторинга качества.
+
+### 8.3 MVP scope (v1, agreed)
+
+Обязательные проверки для v1:
+
+- обязательные ключи в выходе `collect_meteo_data()` (`Temp`, `Rain`, `Freeze_Rain`, `Ice_Pell`, `Snow`, `Wind_Gust`, `U_wind`, `V_wind`, `Vis`);
+- `ndim/shape/time-depth`:
+  - `Temp`: ожидаемо `(nx, ny, 10)`,
+  - суточные метеополя: `(nx, ny, 5)`,
+  - `Wave`: `(nx, ny, 5)`;
+- согласованность spatial dimensions (`nx, ny`) между метео-полями и wave-полем;
+- корректность `start_date/end_date` (тип, порядок, базовая temporal consistency);
+- отсутствие day-level слоёв, полностью заполненных `NaN`;
+- отсутствие `inf/-inf` в массивах;
+- `wave` zero-filled layer detection как индикатор незаполненных временных слоёв.
+
+### 8.4 Soft checks (warning-only layer, agreed)
+
+Проверки второго слоя, не блокирующие v1 по умолчанию:
+
+- физические диапазоны (температура, ветер, видимость, высота волны);
+- NaN ratio thresholds по переменным/дням;
+- sanity checks для категориальных precipitation полей;
+- horizon/date consistency warnings (если даты/горизонт выходят за ожидаемое окно, но не нарушают базовый контракт).
+
+## 9. Deferred tasks / Future work
+
+- **Следующий обязательный шаг после согласования реализации:** `tests/test_validate_outputs.py` (позитивные/негативные кейсы, проверка исключений и warning-режима).
+- **Возможная интеграция после реализации v1:** guard-вызов(ы) в `forecast_morning.py` и `forecast_evening.py` сразу после `collect_meteo_data()` / `collect_wave_data()`.
+- **Более поздний этап:** day-level validation перед `doc_builder.py` (проверка уже сформированных суточных диапазонов/текстовых артефактов).
+- **Вне scope `validate_outputs.py v1`:** конвертация GFS `GRIB2 -> NetCDF`; рассматривается как отдельная задача preprocessing/normalization.
+
+## 10. Инструкция для AI-ассистента
 
 **При начале новой сессии:**
 ```bash

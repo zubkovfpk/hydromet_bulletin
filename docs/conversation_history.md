@@ -1160,3 +1160,49 @@ def validate_wave(wave: np.ndarray,
 - Подготовить ТЗ для Cursor: реализация `utils/validate_outputs.py` по согласованному контракту.
 - Добавить вызовы `validate_meteo()` и `validate_wave()` в `forecast_morning.py` и `forecast_evening.py` (после явного подтверждения).
 - Написать тесты `tests/test_validate_outputs.py`.
+
+---
+
+## Сессия 7 — 15.04.2026
+
+### Статус контекста сессии
+
+- **Implemented (к началу сессии):** ingestion-слой завершён, интеграционные тесты загрузки зелёные.
+- **Agreed for current session:** до подготовки ТЗ сначала зафиксировать реализационный контракт `utils/validate_outputs.py` в документации.
+- **Proposed / deferred:** код `validate_outputs.py` и runtime-интеграция в `forecast_*` не выполнялись в этой сессии, только документирование.
+
+### Формализация контракта будущего `utils/validate_outputs.py` (без реализации кода)
+
+Зафиксированы формулировки для опоры при следующем шаге реализации:
+
+1) **Структура модуля `validate_outputs.py`**
+
+- `class ValidationError(Exception)` — базовое исключение валидации.
+- `class StructureValidationError(ValidationError)` — отсутствуют ключи/не тот тип/не та размерность.
+- `class ShapeValidationError(ValidationError)` — несовместимые формы и глубина по времени.
+- `class DataQualityValidationError(ValidationError)` — all-NaN слои, non-finite значения, деградация качества данных.
+- `class TemporalValidationError(ValidationError)` — некорректные даты и временная согласованность.
+
+2) **Целевые функции API**
+
+- `validate_meteo_output(meteo: dict, strict: bool = True) -> list[str]`
+- `validate_wave_output(wave: np.ndarray, start_date, end_date, strict: bool = True) -> list[str]`
+- `validate_pipeline_outputs(meteo: dict, wave: np.ndarray, start_date, end_date, strict: bool = True) -> list[str]`
+- `assert_valid_for_bulletin(...) -> None`
+- `summarize_validation(warnings: list[str]) -> str`
+
+3) **Режимы строгости**
+
+- `strict=True`: критичные нарушения приводят к исключениям (`ValidationError` и наследники), пайплайн останавливается.
+- `strict=False`: нарушения накапливаются как предупреждения; функция возвращает список warning-сообщений для логирования и последующего анализа.
+
+4) **Поэтапное внедрение (согласовано)**
+
+- Этап 1: `structural checks` — контракт ключей, `ndim/shape/time-depth`, spatial-consistency, `start_date/end_date`, no all-NaN day layers, no `inf/-inf`, детекция zero-filled wave layer.
+- Этап 2: `quality warnings` — физические диапазоны, NaN-ratio thresholds, sanity checks категориальных precipitation полей, horizon/date consistency warnings.
+- Этап 3: `tests` — выделенные тесты `tests/test_validate_outputs.py` на позитивные и негативные сценарии.
+
+### Уточнённые границы scope
+
+- `validate_outputs.py v1` валидирует **результаты** `collect_meteo_data()` и `collect_wave_data()`, а не сырые файлы ingestion.
+- Конвертация GFS `GRIB2 -> NetCDF` не входит в scope `validate_outputs.py v1`; это отдельная потенциальная задача preprocessing/normalization.
