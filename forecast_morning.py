@@ -24,6 +24,7 @@ from utils import (
     create_bulletin_doc,
     send_bulletin,
 )
+from utils.validate_outputs import assert_valid_for_bulletin
 
 # ── Логирование ──────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -64,6 +65,11 @@ def run_morning(cfg: configparser.ConfigParser,
 
         logger.info("Загрузка данных о волнении CMEMS...")
         HWave, start_date, end_date = collect_wave_data(base_dir=base_dir)
+        assert_valid_for_bulletin(
+            meteo_data=meteo,
+            wave_data=(HWave, start_date, end_date),
+            strict=True,
+        )
 
         # ── 2. Формирование контента ──────────────────────────────────────
         n_days = int((end_date - start_date).days)
