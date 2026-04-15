@@ -109,6 +109,9 @@ hydromet_bulletin/
 - **Smoke-тесты**: `tests/test_smoke_downloaders.py` — все зелёные (3 теста).
 - **utils-слой**: `collect_meteo_data`, `collect_wave_data`, `doc_builder`, `email_sender`, `precip_statistics`, `temp_statistics`, `wind_statistics` — реализованы (оригинальная кодовая база, конвертирована из MATLAB).
 - **fetch_inputs.py**: точка входа с CLI (`--config`, `--date`, `--cycle`), валидация секций конфига, lazy-импорты для снижения риска тяжёлого старта.
+- **`utils/validate_outputs.py`**: validation layer реализован, интегрирован в pipeline. Коммит: `c2017ff`.
+- **`tests/test_validate_outputs.py`**: создан, **14/14 тестов passed**.
+- **Guard-call `assert_valid_for_bulletin()`**: интегрирован в `forecast_morning.py` и `forecast_evening.py` — fail-fast до statistics-слоя и `doc_builder`.
 
 ### В работе
 - Интеграционный тест CMEMS: `tests/test_integration_cmems.py` — **СОЗДАН, 3/3 PASSED**
@@ -120,7 +123,6 @@ hydromet_bulletin/
 
 ### Не начато
 - Интеграционные тесты end-to-end (полный цикл forecast → docx → email).
-- Реализация `utils/validate_outputs.py` (API согласован в разделе 8, ведётся в `feature/bulletin-generation`).
 
 
 ## 5. Ключевые технические решения
@@ -195,6 +197,8 @@ hydromet_bulletin/
 ## 7. История ключевых коммитов
 
 ```
+c2017ff (HEAD -> feature/bulletin-generation) feat: add validate_outputs module with pipeline guard (v1)
+c183c0e docs: unify context files and enforce feature branch discipline
 47de5fe test(cmems): add integration tests for CMEMSDownloader with retry and timeout validation
 XXXXXXX docs(project): add project_context.md for AI session continuity
 5d97490 fix(cmems): add retry + timeout protection to CMEMSDownloader
@@ -226,15 +230,15 @@ d63ae3a Baseline hydromet bulletin project (Python + Docker)
 - Актуальное состояние веток проверять перед работой через `git status -b` и `git branch --all`.
 - Для этапа валидации/генерации бюллетеня рабочая ветка: `feature/bulletin-generation`.
 
-## 8. Validate Outputs Contract (agreed current session)
+## 8. Validate Outputs — Implemented API
 
 ### 8.1 Статус и границы
 
-- **Implemented:** ingestion-слой (`fetch_inputs.py`, `utils/downloaders/*`) завершён; текущий pipeline расчёта бюллетеней работает на `collect_meteo_data()` и `collect_wave_data()`.
-- **Agreed for current session:** зафиксирован planned API и scope для `utils/validate_outputs.py` (реализация пока не начата).
-- **Proposed / deferred:** фактическая интеграция guard-вызовов в `forecast_morning.py` / `forecast_evening.py` и unit-тесты в отдельной следующей задаче.
+- **Implemented:** `utils/validate_outputs.py` реализован, протестирован (14/14 passed), интегрирован в pipeline. Коммит: `c2017ff`.
+- **Implemented:** ingestion-слой (`fetch_inputs.py`, `utils/downloaders/*`) завершён; pipeline расчёта бюллетеней работает на `collect_meteo_data()` и `collect_wave_data()`.
+- **Implemented:** guard-вызов `assert_valid_for_bulletin()` добавлен в `forecast_morning.py` и `forecast_evening.py` (fail-fast до statistics-слоя).
 
-### 8.2 Planned API для `utils/validate_outputs.py`
+### 8.2 Реализованный API `utils/validate_outputs.py`
 
 `validate_outputs.py v1` валидирует **результаты выполнения** `collect_meteo_data()` и `collect_wave_data()`:
 
@@ -244,18 +248,20 @@ d63ae3a Baseline hydromet bulletin project (Python + Docker)
 - `class DataQualityValidationError(ValidationError)` — all-NaN day layers, non-finite значения, критичные quality-аномалии.
 - `class TemporalValidationError(ValidationError)` — несогласованные `start_date/end_date` и временная неконсистентность.
 
-Функции:
+Фактически реализованные функции:
 
-- `validate_meteo_output(meteo: dict, strict: bool = True) -> list[str]`
-- `validate_wave_output(wave: np.ndarray, start_date, end_date, strict: bool = True) -> list[str]`
-- `validate_pipeline_outputs(meteo: dict, wave: np.ndarray, start_date, end_date, strict: bool = True) -> list[str]`
-- `assert_valid_for_bulletin(...) -> None`
-- `summarize_validation(warnings: list[str]) -> str`
+- `validate_meteo_output(data, *, strict=True) -> dict`
+- `validate_wave_output(wave, start_date, end_date, *, strict=True) -> dict`
+- `validate_pipeline_outputs(*, meteo_data=None, wave_data=None, strict=True) -> dict`
+- `assert_valid_for_bulletin(*, meteo_data=None, wave_data=None, strict=True) -> None`
+- `summarize_validation(report: dict) -> str`
+
+Функции возвращают `dict` (report), а не `list[str]`.
 
 Режимы:
 
 - `strict=True`: нарушения уровня error приводят к исключениям и остановке шага.
-- `strict=False`: нарушения фиксируются как warning-сообщения, возвращаются списком для логирования/мониторинга качества.
+- `strict=False`: нарушения фиксируются в report, выполнение продолжается.
 
 ### 8.3 MVP scope (v1, agreed)
 
@@ -283,10 +289,10 @@ d63ae3a Baseline hydromet bulletin project (Python + Docker)
 
 ## 9. Deferred tasks / Future work
 
-- **Следующий обязательный шаг после согласования реализации:** `tests/test_validate_outputs.py` (позитивные/негативные кейсы, проверка исключений и warning-режима).
-- **Возможная интеграция после реализации v1:** guard-вызов(ы) в `forecast_morning.py` и `forecast_evening.py` сразу после `collect_meteo_data()` / `collect_wave_data()`.
-- **Более поздний этап:** day-level validation перед `doc_builder.py` (проверка уже сформированных суточных диапазонов/текстовых артефактов).
-- **Вне scope `validate_outputs.py v1`:** конвертация GFS `GRIB2 -> NetCDF`; рассматривается как отдельная задача preprocessing/normalization.
+- **GFS GRIB2 → NetCDF conversion / preprocessing**: не входит в `validate_outputs.py v1`; отдельная задача при переходе на unified NetCDF-pipeline.
+- **Normalizing/preprocessing layer для GFS**: после v1, если прямой переход `gfs_downloader` → `collect_meteo_data` останется неудобным.
+- **Downstream validation перед `doc_builder.py`**: day-level проверка сформированных диапазонов (`wind_min ≤ wind_max` и т.д.); не блокирует v1.
+- **Soft quality rules**: физические диапазоны, NaN ratio thresholds, sanity checks для precipitation — warning-only layer после MVP.
 
 ## 10. Инструкция для AI-ассистента
 
