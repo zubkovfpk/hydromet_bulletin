@@ -54,14 +54,15 @@ gantt
 | 5 | 14–15.04.2026 | ~2 ч | Архитектурный анализ pipeline, выявлены риски валидации, согласован контракт validate_outputs.py |
 | 6 | 15.04.2026 | ~3 ч | validate_outputs.py v1 (14/14 passed), guard-call в forecast_*.py, docs/process rules cleanup |
 | 7 | 16.04.2026 | ~3 ч | Processing layer адаптирован под новый layout (GFS/CMEMS), legacy fallback, arch review Approve, follow-up правки |
+| 8 | 16.04.2026 | ~4 ч | DT-07-3 закрыт, Blocker #1 (logging) + Blocker #2 (shapefile) устранены, arch review ×2 Approve, DT-08-1..7 зафиксированы |
 
-## Общий прогресс: ~62%
+## Общий прогресс: ~70%
 
 ```mermaid
 pie
     title Выполнено vs Осталось
-    "Выполнено" : 62
-    "Осталось"  : 38
+    "Выполнено" : 70
+    "Осталось"  : 30
 ```
 
 ## Deferred tasks
@@ -84,7 +85,7 @@ pie
 | DT-08-6 | Нет unit-теста для `shapefile_dir=None` — проверки, что fallback строит `basedir/data/shapefiles`. Решение: добавить 1 unit-тест в `tests/test_processing_layout_paths.py`. | low | Сессия 9 |
 | DT-08-7 | `shapefile_dir` стал вторым позиционным параметром в `collect_meteo_data()` / `collect_wave_data()`, что рискованно для callers с positional args. Решение: добавить `*` в сигнатуры для принудительного keyword-only. | low | Сессия 9 |
 
-## Следующий этап (сессия 8)
+## Следующий этап (сессия 9)
 
 **Выполнено в сессии 8:**
 - Logging-fix (Blocker #1): `_configure_logging()` вынесен в функцию, динамический путь лога через `basedir`, arch review: Approve.

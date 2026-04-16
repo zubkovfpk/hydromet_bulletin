@@ -1281,3 +1281,151 @@ Checklist (11 пунктов):
 - `forecast_morning.py` / `forecast_evening.py` — обновлён wiring к `collect_*`.
 - `tests/test_processing_layout_paths.py` — новый файл, 6 тестов.
 - `docs/project_progress.md` — сессия 7 закрыта, DT-07-1/2/3 добавлены, прогресс 55% → 62%, план сессии 8 зафиксирован.
+
+---
+
+## Сессия 8 — 16.04.2026
+
+### Контекст
+
+Bulletin generation — устранение blockers для первого dry-run. Цель: закрыть DT-07-3, выявить и устранить operational blockers pipeline, задокументировать deferred items. Роли: Cursor (implementation), Windsurf (arch review + docs), Comet (координация).
+
+Коммиты сессии:
+- `test(processing): add _normalize_cycle and absent-dir tests (DT-07-3)`
+- `fix(logging): replace hardcoded /app/logs/ with dynamic path (Blocker #1)`
+- `feat(session-8): bulletin generation pipeline — blockers resolved, shapefile structure, deferred items — d345bd7`
+
+---
+
+### 1. Закрытие DT-07-3 (Cursor)
+
+Добавлены unit-тесты в `tests/test_processing_layout_paths.py`:
+
+- `_normalize_cycle`: 6 случаев — already-normalized, no-suffix, whitespace+uppercase, empty, None, single-digit (`xfail` — known gap, zero-pad).
+- absent-dir сценарии: `FileNotFoundError` для `collect_meteo_data` и `collect_wave_data` при отсутствии обоих каталогов.
+
+Итог: **27 passed, 1 xfailed**.
+
+---
+
+### 2. Архитектурный анализ bulletin generation pipeline (Windsurf)
+
+Все 6 шагов pipeline (`collect_*` → `assert_valid_for_bulletin` → statistics → `create_bulletin_doc` → `send_bulletin`) реализованы, заглушек нет.
+
+Выявлены два operational blocker для первого dry-run:
+
+| # | Blocker | Причина |
+|---|---------|---------|
+| 1 | Hardcoded `/app/logs/hydromet.log` в `forecast_*.py` | Не работает локально; директория не создаётся автоматически |
+| 2 | `Kasp_Sea.shp` отсутствует в структурированном каталоге | `collect_*` не может построить маску акватории |
+
+---
+
+### 3. Blocker #1 устранён: динамический путь лога (Cursor → Windsurf review)
+
+Реализован `_configure_logging(cfg)` в `forecast_morning.py` / `forecast_evening.py`.
+
+Алгоритм выбора пути:
+
+```python
+log_file = cfg.get("General", "log_file", fallback="").strip() \
+           or cfg.get("Logging", "log_file", fallback="").strip()
+log_path = Path(log_file) if log_file else Path(base_dir) / "logs" / "hydromet.log"
+log_path.parent.mkdir(parents=True, exist_ok=True)
+```
+
+`force=True` в `logging.basicConfig` — исключает накопление duplicate handlers при повторном вызове.
+
+**Windsurf arch review: Approve** (2 независимых прогона). Checklist: 6/6 OK, 1 Minor risk (регистр `[Logging]` vs `[LOGGING]` — DT-08-1).
+
+---
+
+### 4. Blocker #2 устранён: structured shapefile layout (Cursor + ручные действия)
+
+Новая структура:
+```
+data/shapefiles/Kasp_Sea/Kasp_Sea.{cpg,dbf,prj,shp,shx}
+```
+
+Изменения API:
+
+| Функция | Новый параметр |
+|---------|---------------|
+| `collect_meteo_data()` | `shapefile_dir: str \| None = None` |
+| `collect_wave_data()` | `shapefile_dir: str \| None = None` |
+
+Helper `_resolve_shapefile_path(shapefile_dir)` → `Path(shapefile_dir) / "Kasp_Sea" / "Kasp_Sea.shp"` — одинаков в обоих модулях.
+
+`config.example.ini`:
+```ini
+shapefile_dir = %(basedir)s/data/shapefiles
+```
+
+`data/shapefiles/Kasp_Sea/` — закоммичен в репозиторий (статический гео-ресурс, не секрет).
+
+**Windsurf arch review: Approve**. Checklist: 7 OK, 2 Minor risk. Blocking issues: нет.
+
+Backward compatibility подтверждена: все call sites (`forecast_morning.py`, `forecast_evening.py`, тесты) используют keyword args — позиционный сдвиг не реализован как breaking change.
+
+---
+
+### 5. Документация (Windsurf)
+
+- `docs/data_ingestion_design.md` — `shapefile=` → `shapefile_dir=` в call-примерах `collect_wave_data()` / `collect_meteo_data()`; путь `Kasp_Sea.*` → `data/shapefiles/Kasp_Sea/Kasp_Sea.*`.
+- `docs/project_context.md` — разделы 5, 9, 11.3: Shapefile storage policy + DT-08-1..7.
+- `docs/project_progress.md` — DT-08-1..7 добавлены; "Выполнено в сессии 8" зафиксировано.
+
+---
+
+### 6. Тесты финального состояния
+
+**30 passed, 1 xfailed.**
+
+1 known flaky: `test_retry_on_bad_url` — зависит от состояния локального GFS-кэша (DT-08-5, решение: фикстура очистки или mock).
+
+---
+
+### Deferred задачи, зафиксированные в сессии 8
+
+| ID | Задача | Приоритет |
+|----|--------|-----------|
+| DT-08-1 | Регистр `[Logging]` vs `[LOGGING]` в `configparser` | low |
+| DT-08-2 | Одновременная запись в `hydromet.log` при cron-пересечении | medium |
+| DT-08-3 | Ротация логов: `RotatingFileHandler(maxBytes=5MB, backupCount=7)` | medium |
+| DT-08-4 | Права `/app/logs/` в Dockerfile (`RUN mkdir -p /app/logs && chown ...`) | medium |
+| DT-08-5 | `test_retry_on_bad_url` — known flaky test | low |
+| DT-08-6 | Unit-тест `shapefile_dir=None` → fallback path | low |
+| DT-08-7 | Keyword-only сигнатура `collect_*` (добавить `*`) | low |
+
+Зафиксированы в `docs/project_context.md` разделы 9, 11.3 и в `docs/project_progress.md`.
+
+---
+
+### Договорённости сессии 8
+
+- `data/shapefiles/` коммитится в репозиторий (статический гео-ресурс).
+- Legacy fallback сохраняется до явного решения об удалении.
+- Cycle selection: первый из `GFS_CYCLES` — временная policy (Variant B, DT-07-1).
+- Shapefile contract жёстко на `Kasp_Sea` — приемлемо для одного региона; параметризация в deferred.
+
+---
+
+### Open questions → сессия 9
+
+- Первый dry-run `forecast_morning.py` на реальных данных.
+- Сравнение output `.docx` с эталоном `matlab_original/Bulletin_example.docx`.
+- DT-07-1: реализация явного cycle selection CLI-параметра.
+
+---
+
+### Изменения, внесённые в рамках сессии 8
+
+- `tests/test_processing_layout_paths.py` — расширен: `_normalize_cycle` (5 cases + 1 xfail), absent-dir сценарии, shapefile helpers, FileNotFoundError для shapefile. Итого: 30 passed, 1 xfailed.
+- `forecast_morning.py` / `forecast_evening.py` — `_configure_logging(cfg)` вынесен в функцию; `shapefile_dir` из конфига с fallback.
+- `utils/collect_meteo_data.py` — добавлен `shapefile_dir`, `_resolve_shapefile_path()`; upfront FileNotFoundError для shapefile.
+- `utils/collect_wave_data.py` — аналогично.
+- `config.example.ini` — добавлен `shapefile_dir = %(basedir)s/data/shapefiles`.
+- `data/shapefiles/Kasp_Sea/` — закоммичен (5 файлов: `.cpg`, `.dbf`, `.prj`, `.shp`, `.shx`).
+- `docs/data_ingestion_design.md` — `shapefile=` → `shapefile_dir=`, путь обновлён.
+- `docs/project_context.md` — разделы 2, 5, 9, 11.3 обновлены.
+- `docs/project_progress.md` — Gantt, хронология, DT-08-1..7, "Выполнено в сессии 8".
