@@ -1429,3 +1429,103 @@ Backward compatibility подтверждена: все call sites (`forecast_mo
 - `docs/data_ingestion_design.md` — `shapefile=` → `shapefile_dir=`, путь обновлён.
 - `docs/project_context.md` — разделы 2, 5, 9, 11.3 обновлены.
 - `docs/project_progress.md` — Gantt, хронология, DT-08-1..7, "Выполнено в сессии 8".
+
+---
+
+## Сессия 9 — 16.04.2026
+
+### Контекст
+
+Первый dry-run `forecast_morning.py` на реальных данных. Цель: пройти pipeline end-to-end, зафиксировать точки падения, классифицировать как blocking / deferred. Роли: Cursor (execution + fixes), Windsurf (arch analysis + docs), Comet (координация).
+
+---
+
+### 1. BOM-fix: config.ini (Cursor)
+
+Локальный `config.ini` сохранён в UTF-8 с BOM (`\ufeff`). При чтении через `configparser` первая секция разрешалась как `\ufeff[General]` — `MissingSectionHeaderError` до чтения любого ключа.
+
+Фикс: удалён BOM из `config.ini` (минимальное точечное изменение, секции и значения не тронуты).
+
+> `config.ini` не версионируется (в `.gitignore`), правка выполнена только локально.
+
+---
+
+### 2. Import-fix: collect_meteo_data / collect_wave_data (Cursor)
+
+В `forecast_morning.py` использовался импорт:
+
+```python
+from utils import collect_meteo_data   # → объект модуля, не функция
+```
+
+`utils/__init__.py` не реэкспортирует `collect_meteo_data` как callable → вызов `collect_meteo_data(...)` давал `TypeError: 'module' object is not callable`.
+
+Фикс — явный функциональный импорт:
+
+```python
+from utils.collect_meteo_data import collect_meteo_data
+from utils.collect_wave_data import collect_wave_data
+```
+
+---
+
+### 3. Dry-run forecast_morning.py — результат
+
+После BOM-fix и import-fix:
+
+- `config.ini` читается успешно.
+- `_configure_logging(cfg)` инициализируется; лог появился в `D:/app/logs/hydromet.log`.
+- `collect_meteo_data(...)` вызывается корректно.
+- Pipeline падает на fail-fast guard в `collect_meteo_data`:
+
+```
+FileNotFoundError: No GFS .nc files found for run_date=20260416, cycle=00z.
+Checked: \app\Meteo_Parser_2026\results\20260416
+```
+
+**Dry-run считается частично успешным:** инфраструктура (конфиг, логирование, импорты) работает. Pipeline корректно валидирует отсутствие входных данных.
+
+---
+
+### 4. Архитектурный анализ точки падения (Windsurf)
+
+**Наблюдение:** `_discover_gfs_nc_files` ищет `*.nc`, а `gfs_downloader` скачивает `gfs.t00z.pgrb2.0p25.f006` (GRIB2 без расширения `.nc`). Format mismatch.
+
+**Проверенный путь в ошибке** — legacy fallback (`\app\Meteo_Parser_2026\results\20260416`), что подтверждает: new layout (`data/storage/gfs/20260416/00z/`) также пуст или не содержит `.nc`.
+
+**Корневая причина:** DT-01 «GFS GRIB2 → NetCDF conversion» был сознательно отложен. Теперь он **блокирует end-to-end dry-run** — без него ни один путь (new layout, legacy) не даст `*.nc`.
+
+---
+
+### 5. Решения и договорённости
+
+- **Processing layer (`collect_meteo_data`) не меняется** — контракт на `*.nc` сохраняется.
+- **Конвертация GRIB2 → NetCDF реализуется в ingestion layer** (`gfs_downloader.py`, после скачивания) с использованием `cfgrib` + `xarray.to_netcdf()`.
+- **DT-01 переведён из deferred в Blocker #3** (high priority), запланирован на сессию 10.
+- **Dry-run считается частично успешным** по критерию: pipeline запускается и корректно валидирует данные fail-fast.
+
+---
+
+### Deferred / Blocker статус по итогам сессии 9
+
+| ID | Изменение статуса |
+|----|-------------------|
+| DT-01 | deferred (medium) → **Blocker #3, high, сессия 10** |
+| DT-07-1..3, DT-08-1..7 | без изменений |
+
+---
+
+### Open questions → сессия 10
+
+- Реализация DT-01: выбор библиотеки (`cfgrib` vs `eccodes` vs NOAA filter для прямого `.nc`).
+- Повторный dry-run `forecast_morning.py` после DT-01.
+- Сравнение output `.docx` с эталоном `matlab_original/Bulletin_example.docx`.
+
+---
+
+### Изменения, внесённые в рамках сессии 9
+
+- `config.ini` (локальный, не в git) — удалён UTF-8 BOM (Cursor).
+- `forecast_morning.py` — исправлен импорт `collect_meteo_data` / `collect_wave_data` на явный функциональный (Cursor).
+- `docs/project_progress.md` — сессия 9 добавлена в хронологию; DT-01 повышен до Blocker #3; "Следующий этап" переименован в "сессия 10"; план сессии 10 зафиксирован (Windsurf).
+- `docs/conversation_history.md` — добавлена эта запись (Windsurf).

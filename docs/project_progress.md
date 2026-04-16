@@ -55,6 +55,7 @@ gantt
 | 6 | 15.04.2026 | ~3 ч | validate_outputs.py v1 (14/14 passed), guard-call в forecast_*.py, docs/process rules cleanup |
 | 7 | 16.04.2026 | ~3 ч | Processing layer адаптирован под новый layout (GFS/CMEMS), legacy fallback, arch review Approve, follow-up правки |
 | 8 | 16.04.2026 | ~4 ч | DT-07-3 закрыт, Blocker #1 (logging) + Blocker #2 (shapefile) устранены, arch review ×2 Approve, DT-08-1..7 зафиксированы |
+| 9 | 16.04.2026 | ~2 ч | BOM-fix config.ini, import-fix collect_meteo_data, dry-run частично успешен, выявлен Blocker #3 (DT-01: GRIB2→NetCDF) |
 
 ## Общий прогресс: ~70%
 
@@ -69,7 +70,7 @@ pie
 
 | ID | Задача | Приоритет | Этап |
 |----|--------|-----------|------|
-| DT-01 | GFS GRIB2 → NetCDF conversion / preprocessing | medium | После Processing layer adaptation |
+| DT-01 | **[Blocker #3 — Сессия 10]** GFS GRIB2 → NetCDF conversion / preprocessing. `gfs_downloader` скачивает `*.pgrb2`, `collect_meteo_data` ищет `*.nc` — format mismatch блокирует end-to-end dry-run. Решение: конвертация в ingestion layer после скачивания (`cfgrib` + `xarray.to_netcdf()`). | **high** | Сессия 10 |
 | DT-02 | Normalizing/preprocessing layer для GFS | medium | После Processing layer adaptation |
 | DT-03 | Downstream validation перед `doc_builder.py` | low | После validate_outputs v1 |
 | DT-04 | Soft quality rules (физ. диапазоны, NaN ratio, sanity checks) | low | После MVP validate_outputs |
@@ -85,15 +86,14 @@ pie
 | DT-08-6 | Нет unit-теста для `shapefile_dir=None` — проверки, что fallback строит `basedir/data/shapefiles`. Решение: добавить 1 unit-тест в `tests/test_processing_layout_paths.py`. | low | Сессия 9 |
 | DT-08-7 | `shapefile_dir` стал вторым позиционным параметром в `collect_meteo_data()` / `collect_wave_data()`, что рискованно для callers с positional args. Решение: добавить `*` в сигнатуры для принудительного keyword-only. | low | Сессия 9 |
 
-## Следующий этап (сессия 9)
+## Следующий этап (сессия 10)
 
-**Выполнено в сессии 8:**
-- Logging-fix (Blocker #1): `_configure_logging()` вынесен в функцию, динамический путь лога через `basedir`, arch review: Approve.
-- Shapefile path resolution: шейп-файлы перенесены в `data/shapefiles/Kasp_Sea/`, путь через `shapefile_dir` в `[General]`, передаётся явным параметром в `collect_meteo_data()` / `collect_wave_data()`.
-- Backward-compatibility review: чистый (все call sites обновлены, keyword args повсеместно).
-- `docs/data_ingestion_design.md` обновлён: `shapefile=` → `shapefile_dir=` в call-примерах `collect_meteo_data()` / `collect_wave_data()`.
-- DT-08-1–7 зафиксированы в canonical docs.
+**Выполнено в сессии 9:**
+- BOM-fix: удалён UTF-8 BOM из `config.ini` — `configparser` больше не выдаёт `MissingSectionHeaderError` на `\ufeff[General]`.
+- Import-fix: в `forecast_morning.py` заменён некорректный `from utils import collect_meteo_data` на явный `from utils.collect_meteo_data import collect_meteo_data` (+ аналогично для `collect_wave_data`). `TypeError: 'module' object is not callable` устранён.
+- Dry-run `forecast_morning.py`: частично успешен — pipeline стартует, читает конфиг, инициализирует логирование, корректно валидирует отсутствие `.nc`-данных (fail-fast).
+- Выявлен Blocker #3: format mismatch GRIB2 vs NetCDF — DT-01 переведён в high-priority, запланирован на сессию 10.
 
-1. **Закрыть DT-07-3** — добавить 2–3 unit-теста в `tests/test_processing_layout_paths.py`: `_normalize_cycle` (граничные случаи) + сценарий "обе директории отсутствуют".
-2. **Проработать DT-07-1** — определить policy cycle selection: единый `00z` или раздельные ключи `GFS_CYCLE_MORNING` / `GFS_CYCLE_EVENING` в `[GFS_SOURCES]`. Согласовать с пользователем до реализации.
-3. **Перейти к следующему согласованному этапу** согласно `docs/project_context.md` — генерация бюллетеня (шаблон `.docx`, `forecast_morning.py` / `forecast_evening.py` полная реализация).
+1. **Реализовать DT-01** — конвертация GRIB2 → NetCDF в ingestion layer (в `gfs_downloader.py`, `cfgrib` + `xarray.to_netcdf()`), чтобы `collect_meteo_data` находил `*.nc`. Arch review Windsurf после реализации.
+2. **Повторить dry-run** после закрытия DT-01 — полный проход `forecast_morning.py` на реальных данных.
+3. **Сравнение output `.docx` с эталоном** `matlab_original/Bulletin_example.docx`.
