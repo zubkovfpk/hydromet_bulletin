@@ -1,8 +1,12 @@
+import pytest
+
 from utils.collect_meteo_data import (
+    _normalize_cycle,
     _discover_gfs_nc_files,
+    collect_meteo_data,
     _resolve_gfs_data_dir,
 )
-from utils.collect_wave_data import _resolve_cmems_wave_dir
+from utils.collect_wave_data import _resolve_cmems_wave_dir, collect_wave_data
 
 
 def test_resolve_gfs_data_dir_prefers_new_layout(tmp_path):
@@ -90,3 +94,53 @@ def test_resolve_cmems_wave_dir_falls_back_to_legacy(tmp_path):
         legacy_waves_dir="waves",
     )
     assert resolved == legacy
+
+
+@pytest.mark.parametrize(
+    ("raw_cycle", "expected"),
+    [
+        ("00z", "00z"),
+        ("12", "12z"),
+        ("  00Z  ", "00z"),
+        ("", "00z"),
+        (None, "00z"),
+    ],
+)
+def test_normalize_cycle_supported_values(raw_cycle, expected):
+    assert _normalize_cycle(raw_cycle) == expected
+
+
+@pytest.mark.xfail(reason="Current implementation returns '6z', pending zero-pad normalization to '06z'.")
+def test_normalize_cycle_single_digit_zero_padded():
+    assert _normalize_cycle("6") == "06z"
+
+
+def test_collect_meteo_data_raises_file_not_found_for_absent_dirs(tmp_path):
+    run_date = "20260415"
+    cycle = "00z"
+    with pytest.raises(FileNotFoundError) as exc_info:
+        collect_meteo_data(
+            base_dir=str(tmp_path),
+            run_date=run_date,
+            cycle=cycle,
+            gfs_storage_subdir="data/storage/gfs",
+            results_subdir="Meteo_Parser_2026/results",
+        )
+    msg = str(exc_info.value)
+    assert f"run_date={run_date}" in msg
+    assert f"cycle={cycle}" in msg
+    assert "Checked:" in msg
+
+
+def test_collect_wave_data_raises_file_not_found_for_absent_dirs(tmp_path):
+    run_date = "20260415"
+    with pytest.raises(FileNotFoundError) as exc_info:
+        collect_wave_data(
+            base_dir=str(tmp_path),
+            run_date=run_date,
+            cmems_storage_subdir="data/storage/cmems",
+            waves_dir="waves",
+        )
+    msg = str(exc_info.value)
+    assert f"run_date={run_date}" in msg
+    assert "Checked:" in msg
