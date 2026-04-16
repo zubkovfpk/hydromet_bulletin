@@ -56,15 +56,27 @@ def run_evening(cfg: configparser.ConfigParser,
     t_start = time.time()
     base_dir = cfg.get("General", "basedir", fallback=".")
     out_dir  = cfg.get("General", "output_dir", fallback="./output")
+    gfs_storage_subdir = cfg.get("GFS_STORAGE", "GFS_OUTPUT_DIR", fallback="data/storage/gfs")
+    cmems_storage_subdir = cfg.get("CMEMS_STORAGE", "CMEMS_OUTPUT_DIR", fallback="data/storage/cmems")
+    gfs_cycle = cfg.get("GFS_SOURCES", "GFS_CYCLES", fallback="00z").split(",")[0].strip()
 
     try:
         # ── 1. Загрузка данных ────────────────────────────────────────────
         logger.info("=== Вечерний бюллетень: старт ===")
         logger.info("Загрузка метеоданных GFS...")
-        meteo = collect_meteo_data(base_dir=base_dir, run_date=run_date)
+        meteo = collect_meteo_data(
+            base_dir=base_dir,
+            run_date=run_date,
+            cycle=gfs_cycle,
+            gfs_storage_subdir=gfs_storage_subdir,
+        )
 
         logger.info("Загрузка данных о волнении CMEMS...")
-        HWave, start_date, end_date = collect_wave_data(base_dir=base_dir)
+        HWave, start_date, end_date = collect_wave_data(
+            base_dir=base_dir,
+            run_date=run_date,
+            cmems_storage_subdir=cmems_storage_subdir,
+        )
         assert_valid_for_bulletin(
             meteo_data=meteo,
             wave_data=(HWave, start_date, end_date),

@@ -7,7 +7,7 @@ collect_wave_data.py
 """
 
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 
 import numpy as np
 import netCDF4 as nc
@@ -34,12 +34,32 @@ def _build_mask(lon_grid: np.ndarray, lat_grid: np.ndarray,
     return mask
 
 
+def _resolve_cmems_wave_dir(
+    base_dir: str,
+    run_date: str,
+    cmems_storage_subdir: str,
+    legacy_waves_dir: str,
+) -> Path:
+    """
+    Resolve CMEMS directory using new storage layout with legacy fallback.
+
+    New layout: data/storage/cmems/YYYYMMDD/
+    Legacy layout: waves/
+    """
+    new_layout_dir = Path(base_dir) / cmems_storage_subdir / run_date
+    if new_layout_dir.exists():
+        return new_layout_dir
+    return Path(base_dir) / legacy_waves_dir
+
+
 def collect_wave_data(
     base_dir: str = ".",
     waves_dir: str = "waves",
+    cmems_storage_subdir: str = "data/storage/cmems",
     shapefile: str = "Kasp_Sea.shp",
     lon_bounds: tuple = (46, 55),
     lat_bounds: tuple = (42, 48),
+    run_date: str | None = None,
 ) -> tuple[np.ndarray, datetime, datetime]:
     """
     Загружает данные высоты волн VHM0_WW из CMEMS.
@@ -47,10 +67,12 @@ def collect_wave_data(
     Parameters
     ----------
     base_dir   : str   — корневая папка проекта
-    waves_dir  : str   — подпапка с .nc файлами волн
+    waves_dir  : str   — legacy подпапка с .nc файлами волн
+    cmems_storage_subdir : str — путь к новому CMEMS storage относительно base_dir
     shapefile  : str   — контур акватории
     lon_bounds : tuple — (min_lon, max_lon) для обрезки
     lat_bounds : tuple — (min_lat, max_lat) для обрезки
+    run_date   : str | None — дата запуска 'YYYYMMDD'; если None — сегодня
 
     Returns
     -------
@@ -58,8 +80,21 @@ def collect_wave_data(
     start_date : datetime
     end_date   : datetime
     """
-    wave_path = Path(base_dir) / waves_dir
+    if run_date is None:
+        run_date = date.today().strftime("%Y%m%d")
+
+    wave_path = _resolve_cmems_wave_dir(
+        base_dir=base_dir,
+        run_date=run_date,
+        cmems_storage_subdir=cmems_storage_subdir,
+        legacy_waves_dir=waves_dir,
+    )
     nc_files = sorted(wave_path.glob("*.nc"))
+    if not nc_files:
+        raise FileNotFoundError(
+            f"No CMEMS .nc files found for run_date={run_date}. "
+            f"Checked: {wave_path}"
+        )
 
     # Глобальный буфер: 4320×2041×40 (как в оригинале)
     # Размер определим по первому файлу

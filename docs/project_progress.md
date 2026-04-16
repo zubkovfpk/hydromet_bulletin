@@ -27,7 +27,7 @@ gantt
     precip_statistics.py         :done, 2026-04-12, 1d
     Валидация выходных данных    :done, 2026-04-15, 1d
     Документация / process rules :done, 2026-04-15, 1d
-    Processing layer adaptation  :active, 2026-04-16, 3d
+    Processing layer adaptation  :done, 2026-04-16, 1d
     section Генерация бюллетеня
     doc_builder.py (каркас)      :done, 2026-04-12, 1d
     Шаблон .docx (стили/секции) :2026-04-17, 2d
@@ -52,22 +52,32 @@ gantt
 | 4 | 14.04.2026 | ~4 ч | Интеграционные тесты CMEMS (3/3 PASSED), настройка Windsurf/Pyright, интеграционные тесты GFS |
 | 5 | 14–15.04.2026 | ~2 ч | Архитектурный анализ pipeline, выявлены риски валидации, согласован контракт validate_outputs.py |
 | 6 | 15.04.2026 | ~3 ч | validate_outputs.py v1 (14/14 passed), guard-call в forecast_*.py, docs/process rules cleanup |
+| 7 | 16.04.2026 | ~3 ч | Processing layer адаптирован под новый layout (GFS/CMEMS), legacy fallback, arch review Approve, follow-up правки |
 
-## Общий прогресс: ~55%
+## Общий прогресс: ~62%
 
 ```mermaid
 pie
     title Выполнено vs Осталось
-    "Выполнено" : 55
-    "Осталось"  : 45
+    "Выполнено" : 62
+    "Осталось"  : 38
 ```
 
 ## Deferred tasks
 
-| # | Задача | Приоритет | Этап |
-|---|--------|-----------|------|
-| 1 | GFS GRIB2 → NetCDF conversion / preprocessing | medium | После Processing layer adaptation |
-| 2 | Normalizing/preprocessing layer для GFS | medium | После Processing layer adaptation |
-| 3 | Downstream validation перед `doc_builder.py` | low | После validate_outputs v1 |
-| 4 | Soft quality rules (физ. диапазоны, NaN ratio, sanity checks) | low | После MVP validate_outputs |
-| 5 | Интеграционные тесты end-to-end (forecast → docx → email) | high | После Генерации бюллетеня |
+| ID | Задача | Приоритет | Этап |
+|----|--------|-----------|------|
+| DT-01 | GFS GRIB2 → NetCDF conversion / preprocessing | medium | После Processing layer adaptation |
+| DT-02 | Normalizing/preprocessing layer для GFS | medium | После Processing layer adaptation |
+| DT-03 | Downstream validation перед `doc_builder.py` | low | После validate_outputs v1 |
+| DT-04 | Soft quality rules (физ. диапазоны, NaN ratio, sanity checks) | low | После MVP validate_outputs |
+| DT-05 | Интеграционные тесты end-to-end (forecast → docx → email) | high | После Генерации бюллетеня |
+| DT-07-1 | GFS cycle как явный параметр (`--cycle` CLI или `GFS_CYCLE_MORNING/EVENING`) | medium | Сессия 8 |
+| DT-07-2 | `logger.info` resolved path для CMEMS в `_resolve_cmems_wave_dir()` | low | Сессия 8 или по необходимости |
+| DT-07-3 | Unit-тесты для `_normalize_cycle` и absent-dir сценария | low | Сессия 8 |
+
+## Следующий этап (сессия 8)
+
+1. **Закрыть DT-07-3** — добавить 2–3 unit-теста в `tests/test_processing_layout_paths.py`: `_normalize_cycle` (граничные случаи) + сценарий "обе директории отсутствуют".
+2. **Проработать DT-07-1** — определить policy cycle selection: единый `00z` или раздельные ключи `GFS_CYCLE_MORNING` / `GFS_CYCLE_EVENING` в `[GFS_SOURCES]`. Согласовать с пользователем до реализации.
+3. **Перейти к следующему согласованному этапу** согласно `docs/project_context.md` — генерация бюллетеня (шаблон `.docx`, `forecast_morning.py` / `forecast_evening.py` полная реализация).

@@ -2,12 +2,13 @@
 collect_meteo_data.py
 Конвертация MATLAB collect_meteo_data.m → Python
 
-Читает NetCDF-файлы метеопрогноза GFS из папки results/<YYYYMMDD>/,
+Читает NetCDF-файлы метеопрогноза GFS из папки data/storage/gfs/YYYYMMDD/HHz/ (с fallback на legacy layout),
 применяет маску акватории Каспийского моря из шейп-файла,
 агрегирует данные по суточным интервалам.
 """
 
 import os
+import logging
 from datetime import date
 from pathlib import Path
 
@@ -15,6 +16,8 @@ import numpy as np
 import netCDF4 as nc
 import geopandas as gpd
 from shapely.geometry import Point
+
+logger = logging.getLogger(__name__)
 
 
 def _build_mask(lon_grid: np.ndarray, lat_grid: np.ndarray,
@@ -34,11 +37,63 @@ def _build_mask(lon_grid: np.ndarray, lat_grid: np.ndarray,
     return mask
 
 
+def _normalize_cycle(cycle: str | None) -> str:
+    if not cycle:
+        return "00z"
+    cycle_norm = cycle.strip().lower()
+    return cycle_norm if cycle_norm.endswith("z") else f"{cycle_norm}z"
+
+
+def _resolve_gfs_data_dir(
+    base_dir: str,
+    run_date: str,
+    cycle: str | None,
+    gfs_storage_subdir: str,
+    legacy_results_subdir: str,
+) -> Path:
+    """
+    Resolve GFS input directory using new storage layout with legacy fallback.
+
+    New layout: data/storage/gfs/YYYYMMDD/HHz/
+    Legacy layout: Meteo_Parser_2026/results/YYYYMMDD/
+    """
+    cycle_dir = _normalize_cycle(cycle)
+    new_layout_dir = Path(base_dir) / gfs_storage_subdir / run_date / cycle_dir
+    if new_layout_dir.exists():
+        logger.info("GFS data dir resolved: %s", new_layout_dir)
+        return new_layout_dir
+    legacy_dir = Path(base_dir) / legacy_results_subdir / run_date
+    logger.info("GFS data dir resolved: %s", legacy_dir)
+    return legacy_dir
+
+
+def _discover_gfs_nc_files(data_dir: Path) -> list[Path]:
+    """
+    Collect GFS NetCDF files from both flat and nested layouts.
+
+    - New layout: *.nc files directly in YYYYMMDD/HHz/
+    - Legacy layout: one step per subdirectory with *.nc inside
+    """
+    if not data_dir.exists():
+        return []
+
+    direct_nc = sorted(data_dir.glob("*.nc"))
+    if direct_nc:
+        return direct_nc
+
+    nested_nc: list[Path] = []
+    for subdir in sorted([d for d in data_dir.iterdir() if d.is_dir()]):
+        nested_nc.extend(sorted(subdir.glob("*.nc")))
+    return nested_nc
+
+
 def collect_meteo_data(
     base_dir: str = ".",
     results_subdir: str = "Meteo_Parser_2026/results",
+    gfs_storage_subdir: str = "data/storage/gfs",
     shapefile: str = "Kasp_Sea.shp",
     run_date: str | None = None,
+    cycle: str | None = None,
 ) -> dict:
     """
     Загружает метеоданные GFS и возвращает словарь с массивами.
@@ -46,9 +101,11 @@ def collect_meteo_data(
     Parameters
     ----------
     base_dir        : str  — корневая папка проекта
-    results_subdir  : str  — путь к папке results относительно base_dir
+    results_subdir  : str  — legacy путь к папке results относительно base_dir
+    gfs_storage_subdir : str — путь к новому GFS storage относительно base_dir
     shapefile       : str  — имя shp-файла с контуром акватории
     run_date        : str | None — дата запуска 'YYYYMMDD'; если None — сегодня
+    cycle           : str | None — цикл GFS ('00z'/'06z'/'12z'/'18z'), если None — '00z'
 
     Returns
     -------
@@ -61,10 +118,19 @@ def collect_meteo_data(
     if run_date is None:
         run_date = date.today().strftime("%Y%m%d")
 
-    data_dir = Path(base_dir) / results_subdir / run_date
-
-    # Получаем отсортированный список подпапок (каждая = один шаг прогноза)
-    subdirs = sorted([d for d in data_dir.iterdir() if d.is_dir()])
+    data_dir = _resolve_gfs_data_dir(
+        base_dir=base_dir,
+        run_date=run_date,
+        cycle=cycle,
+        gfs_storage_subdir=gfs_storage_subdir,
+        legacy_results_subdir=results_subdir,
+    )
+    nc_files = _discover_gfs_nc_files(data_dir)
+    if not nc_files:
+        raise FileNotFoundError(
+            f"No GFS .nc files found for run_date={run_date}, "
+            f"cycle={cycle}. Checked: {data_dir}"
+        )
 
     accum: dict[str, list] = {
         "Temp": [], "Rain": [], "Freeze_Rain": [], "Ice_Pell": [],
@@ -73,12 +139,7 @@ def collect_meteo_data(
 
     lat_arr = lon_arr = None
 
-    for subdir in subdirs:
-        nc_files = list(subdir.glob("*.nc"))
-        if not nc_files:
-            continue
-        nc_path = nc_files[0]
-
+    for nc_path in nc_files:
         with nc.Dataset(nc_path) as ds:
             accum["Temp"].append(ds.variables["Temperature_surface"][:].data)
             accum["Rain"].append(ds.variables["Categorical_Rain_surface"][:].data)
