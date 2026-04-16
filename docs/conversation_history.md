@@ -1151,3 +1151,133 @@ Feature-коммиты по этапу `validate_outputs.py` и bulletin generat
 - `docs/project_context.md` — обновлён раздел `1.1`; добавлен раздел `## 11. Process Rules` (11.1 Canonical paths / 11.2 Branch policy / 11.3 Deferred-task logging).
 - `windsurf.rules.md` — добавлены разделы `## 9` (startup rules) и `## 10` (branch discipline).
 - `docs/conversation_history.md` — добавлена эта запись.
+
+---
+
+## Сессия 7 — 16.04.2026
+
+### Контекст
+
+Processing layer adaptation. Цель: привести `collect_meteo_data.py` и `collect_wave_data.py` под реальный post-ingestion layout, продуцируемый ingestion-слоем. Роли: Cursor (implementation), Windsurf (arch review + docs), Comet (координация).
+
+---
+
+### Адаптация processing layer (Cursor)
+
+#### Целевой layout
+
+```
+data/storage/gfs/YYYYMMDD/HHz/   ← GFS (new primary)
+data/storage/cmems/YYYYMMDD/     ← CMEMS (new primary)
+```
+
+С сохранением legacy fallback для обратной совместимости:
+
+```
+Meteo_Parser_2026/results/YYYYMMDD/   ← GFS legacy
+waves/                                 ← CMEMS legacy
+```
+
+#### Реализованные helper-функции
+
+**`utils/collect_meteo_data.py`:**
+
+- `_normalize_cycle(cycle)` — нормализует строку цикла (`"12"` → `"12z"`, `None` → `"00z"`).
+- `_resolve_gfs_data_dir(base_dir, run_date, cycle, gfs_storage_subdir, legacy_results_subdir)` — проверяет new layout, при отсутствии возвращает legacy путь.
+- `_discover_gfs_nc_files(data_dir)` — собирает `.nc` из flat-layout (new) или nested-layout (legacy: один шаг = одна подпапка). Возвращает `[]` при отсутствии директории.
+
+**`utils/collect_wave_data.py`:**
+
+- `_resolve_cmems_wave_dir(base_dir, run_date, cmems_storage_subdir, legacy_waves_dir)` — аналогичный резолвер для CMEMS.
+
+#### Изменения публичного API
+
+| Функция | Новые параметры |
+|---------|----------------|
+| `collect_meteo_data()` | `gfs_storage_subdir: str`, `cycle: str \| None` |
+| `collect_wave_data()` | `cmems_storage_subdir: str`, `run_date: str \| None` |
+
+Все новые параметры имеют defaults → backward compatibility сохранена.
+
+#### Forecast orchestration
+
+`forecast_morning.py` и `forecast_evening.py` — симметрично обновлены:
+
+```python
+gfs_storage_subdir  = cfg.get("GFS_STORAGE",  "GFS_OUTPUT_DIR",  fallback="data/storage/gfs")
+cmems_storage_subdir = cfg.get("CMEMS_STORAGE", "CMEMS_OUTPUT_DIR", fallback="data/storage/cmems")
+gfs_cycle = cfg.get("GFS_SOURCES", "GFS_CYCLES", fallback="00z").split(",")[0].strip()
+```
+
+`assert_valid_for_bulletin(strict=True)` — сохранён на прежнем месте без изменений.
+
+#### Тесты
+
+Новый файл: `tests/test_processing_layout_paths.py`, 6 тестов:
+
+- `_resolve_gfs_data_dir` prefers new layout / falls back to legacy
+- `_discover_gfs_nc_files` handles flat / nested layout
+- `_resolve_cmems_wave_dir` prefers dated dir / falls back to legacy
+
+Все тесты используют `tmp_path`. Реальные данные не задействованы.
+
+---
+
+### Архитектурный review (Windsurf)
+
+**Вердикт: Approve**
+
+Checklist (11 пунктов):
+
+| Пункт | Статус | Ключевое наблюдение |
+|-------|--------|---------------------|
+| Scope Adherence | ✅ OK | Ingestion layer не тронут; deferred задачи не вплыли |
+| Path Resolution Correctness | ✅ OK | New layout строго приоритетен через `.exists()` |
+| GFS-specific | ⚠️ Minor | `gfs_cycle` = первый элемент `GFS_CYCLES` — всегда `00z` для обоих бюллетеней |
+| CMEMS-specific | ⚠️ Minor | `wave_path.glob()` на несуществующем пути → неинформативный `IndexError` |
+| Forecast Orchestration | ✅ OK | Полная симметрия morning/evening, единый wiring |
+| Error Handling | ⚠️ Minor | Пустой `nc_files` → `np.stack` / `IndexError` вместо явного сообщения |
+| Guard Preservation | ✅ OK | `assert_valid_for_bulletin(strict=True)` на месте, не обойден |
+| Test Adequacy | ⚠️ Minor | `_normalize_cycle` не покрыта; absent-dir сценарий не тестируется явно |
+| Maintainability | ✅ OK | Хелперы хорошо названы, docstrings есть, нет дублирования |
+| Backward Compatibility | ✅ OK | Все новые параметры с defaults; legacy paths структурно сохранены |
+| Deferred Tasks Guardrail | ✅ OK | Ничего из deferred не вплыло в дифф |
+
+---
+
+### Follow-up 1 (Cursor)
+
+По minor risk из review:
+
+- Добавлен явный `FileNotFoundError` с информативным сообщением в `collect_meteo_data` и `collect_wave_data` при пустом `nc_files`.
+- Добавлен `logger.info(f"GFS data dir resolved: {data_dir}")` в `_resolve_gfs_data_dir`.
+- Обновлён module docstring `collect_meteo_data.py` (строка 5 устарела после адаптации).
+
+---
+
+### Deferred задачи, зафиксированные в сессии 7
+
+| ID | Задача | Приоритет |
+|----|--------|-----------|
+| DT-07-1 | GFS cycle как явный параметр (`--cycle` CLI или `GFS_CYCLE_MORNING/EVENING`) | medium |
+| DT-07-2 | `logger.info` resolved path для CMEMS в `_resolve_cmems_wave_dir()` | low |
+| DT-07-3 | Unit-тесты `_normalize_cycle` + absent-dir сценария | low |
+
+Зафиксированы в `docs/project_progress.md`.
+
+---
+
+### Open questions → сессия 8
+
+- Нужен ли явный `logger.warning` при срабатывании legacy fallback (сейчас — тихий fallback)?
+- Cycle selection policy: единый `00z` для обоих бюллетеней или раздельные ключи `GFS_CYCLE_MORNING` / `GFS_CYCLE_EVENING`? Согласовать с пользователем до реализации.
+
+---
+
+### Изменения, внесённые в рамках сессии 7
+
+- `utils/collect_meteo_data.py` — адаптирован под новый GFS layout, добавлены хелперы.
+- `utils/collect_wave_data.py` — адаптирован под новый CMEMS layout, добавлен хелпер.
+- `forecast_morning.py` / `forecast_evening.py` — обновлён wiring к `collect_*`.
+- `tests/test_processing_layout_paths.py` — новый файл, 6 тестов.
+- `docs/project_progress.md` — сессия 7 закрыта, DT-07-1/2/3 добавлены, прогресс 55% → 62%, план сессии 8 зафиксирован.
