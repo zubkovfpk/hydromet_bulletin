@@ -26,6 +26,10 @@ def _build_mask(lon_grid: np.ndarray, lat_grid: np.ndarray,
     Строит булеву маску акватории по шейп-файлу.
     True = точка находится внутри полигона (акватория).
     """
+    shp_path = Path(shapefile_path)
+    if not shp_path.exists():
+        raise FileNotFoundError(f"Shapefile not found: {shp_path}")
+
     gdf = gpd.read_file(shapefile_path)
     union = gdf.unary_union  # объединяем все геометрии в одну
 
@@ -87,11 +91,20 @@ def _discover_gfs_nc_files(data_dir: Path) -> list[Path]:
     return nested_nc
 
 
+def _resolve_shapefile_path(shapefile_dir: str) -> Path:
+    """
+    Resolve shapefile path using structured directory layout:
+
+    data/shapefiles/Kasp_Sea/Kasp_Sea.shp
+    """
+    return Path(shapefile_dir) / "Kasp_Sea" / "Kasp_Sea.shp"
+
+
 def collect_meteo_data(
     base_dir: str = ".",
+    shapefile_dir: str | None = None,
     results_subdir: str = "Meteo_Parser_2026/results",
     gfs_storage_subdir: str = "data/storage/gfs",
-    shapefile: str = "Kasp_Sea.shp",
     run_date: str | None = None,
     cycle: str | None = None,
 ) -> dict:
@@ -101,9 +114,9 @@ def collect_meteo_data(
     Parameters
     ----------
     base_dir        : str  — корневая папка проекта
+    shapefile_dir   : str | None — путь к каталогу shapefiles; если None — %(basedir)s/data/shapefiles
     results_subdir  : str  — legacy путь к папке results относительно base_dir
     gfs_storage_subdir : str — путь к новому GFS storage относительно base_dir
-    shapefile       : str  — имя shp-файла с контуром акватории
     run_date        : str | None — дата запуска 'YYYYMMDD'; если None — сегодня
     cycle           : str | None — цикл GFS ('00z'/'06z'/'12z'/'18z'), если None — '00z'
 
@@ -117,6 +130,8 @@ def collect_meteo_data(
     """
     if run_date is None:
         run_date = date.today().strftime("%Y%m%d")
+    if shapefile_dir is None:
+        shapefile_dir = str(Path(base_dir) / "data" / "shapefiles")
 
     data_dir = _resolve_gfs_data_dir(
         base_dir=base_dir,
@@ -131,6 +146,10 @@ def collect_meteo_data(
             f"No GFS .nc files found for run_date={run_date}, "
             f"cycle={cycle}. Checked: {data_dir}"
         )
+
+    shp_path = _resolve_shapefile_path(shapefile_dir)
+    if not shp_path.exists():
+        raise FileNotFoundError(f"Shapefile not found: {shp_path}")
 
     accum: dict[str, list] = {
         "Temp": [], "Rain": [], "Freeze_Rain": [], "Ice_Pell": [],
@@ -164,7 +183,6 @@ def collect_meteo_data(
     Lat = Lat_raw.T
 
     # Маска акватории
-    shp_path = Path(base_dir) / shapefile
     mask = _build_mask(Lon, Lat, str(shp_path))  # (nx, ny)
 
     # Агрегация по суткам: шаги по 3ч → 8 шагов на сутки

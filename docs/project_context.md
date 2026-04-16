@@ -23,6 +23,7 @@ GFS (NOMADS) и волновых данных CMEMS, обработка, ген�
 ## 2. Структура файлов
 
 > `data/`, `etalon_data/`, `logs/`, `config.ini` — в `.gitignore`, в репозиторий не входят.
+> `data/shapefiles/` — **не** в `.gitignore`; шейп-файлы коммитятся (без реальных данных GRIB/NetCDF).
 
 ```
 hydromet_bulletin/
@@ -42,6 +43,15 @@ hydromet_bulletin/
 │    project_progress.md                 прогресс разработки (Mermaid)
 │    Training_Windsurf&Cursor.md         инструкции по работе с AI-агентами
 │    project_context.md         контекст проекта для AI-ассистента
+│
+├─ data/
+│    └─ shapefiles/
+│         └─ Kasp_Sea/
+│              Kasp_Sea.cpg
+│              Kasp_Sea.dbf
+│              Kasp_Sea.prj
+│              Kasp_Sea.shp
+│              Kasp_Sea.shx
 │
 ├─ matlab_original/             исходные MATLAB-скрипты (только для справки)
 │    forecast_morning.m
@@ -134,6 +144,12 @@ hydromet_bulletin/
 - **Credentials**: никогда не коммитятся. `config.ini` в `.gitignore`. Только `config.example.ini` с `CHANGE_ME`.
 - **Config**: `configparser.ConfigParser` (case-insensitive keys). Секции `CMEMS_*` и `GFS_*` разделены, общие `[DOWNLOAD]`/`[STORAGE]`/`[LOGGING]` — для CMEMS.
 - **CMEMS fallback policy**: при S3 нестабильности предпочтителен `cmems_download_mode=subset` (HTTP-only) для повышения production-стабильности.
+- **Shapefile storage policy**: шейп-файлы (`Kasp_Sea.*`) хранятся в `data/shapefiles/Kasp_Sea/`, не в корне проекта. Путь управляется через конфиг-ключ `shapefile_dir` в секции `[General]` (`%(basedir)s/data/shapefiles`). `collect_meteo_data()` и `collect_wave_data()` получают `shapefile_dir` как явный параметр.
+- **GFS cycle selection — временная policy (DT-07-1, вариант B)**: при запуске `forecast_morning.py` / `forecast_evening.py` цикл GFS определяется как первый элемент из `GFS_CYCLES` в `[GFS_SOURCES]`:
+  ```python
+  gfs_cycle = cfg.get("GFS_SOURCES", "GFS_CYCLES", fallback="00z").split(",")[0].strip()
+  ```
+  Это **временное решение** в рамках адаптации processing layer (сессия 7); не является финальной policy. Финальное решение (явный `--cycle` CLI-параметр с приоритетом над конфигом) вынесено в DT-07-1 — см. раздел 9.
 - **Python интерпретатор**: использовать `py` (Python Launcher для Windows) — он автоматически находит установленный Python 3.x без привязки к конкретному пути.  
   **НЕ использовать просто `python`** — в системе он указывает на Microsoft Store stub.
 - **Запуск smoke-тестов** (PowerShell):
@@ -293,6 +309,13 @@ d63ae3a Baseline hydromet bulletin project (Python + Docker)
 - **Normalizing/preprocessing layer для GFS**: после v1, если прямой переход `gfs_downloader` → `collect_meteo_data` останется неудобным.
 - **Downstream validation перед `doc_builder.py`**: day-level проверка сформированных диапазонов (`wind_min ≤ wind_max` и т.д.); не блокирует v1.
 - **Soft quality rules**: физические диапазоны, NaN ratio thresholds, sanity checks для precipitation — warning-only layer после MVP.
+- **DT-07-1 — явный выбор GFS cycle для bulletin generation**: перейти на CLI-параметр `--cycle` в `forecast_morning.py` / `forecast_evening.py`; целевая policy — CLI-параметр имеет приоритет над значением по умолчанию из конфига. Текущая временная policy (первый элемент `GFS_CYCLES`) сохраняется как fallback. Реализовывать **отдельной задачей / отдельным PR**, вне scope адаптации processing layer. Этап: сессия 8.
+- **DT-08-1 — регистр `[Logging]` vs `[LOGGING]` в configparser**: `_configure_logging()` ищет секцию `[Logging]`, в `config.example.ini` секция называется `[LOGGING]`; `configparser` чувствителен к регистру секций — feature `log_file` из конфига не работает. Приоритет: низкий. Этап: сессия 9.
+- **DT-08-2 — одновременная запись в `hydromet.log`**: при cron-пересечении morning + evening оба процесса пишут в один файл через раздельные `FileHandler` — строки могут чередоваться. Решение: раздельные `hydromet_morning.log` / `hydromet_evening.log` или `SocketHandler`. Приоритет: средний. Этап: сессия 9.
+- **DT-08-3 — ротация логов**: `FileHandler` пишет без ограничения размера; лог растёт неограниченно при ежедневном cron. Решение: `RotatingFileHandler(maxBytes=5MB, backupCount=7)`. Приоритет: средний. Этап: сессия 9.
+- **DT-08-4 — права `/app/logs/` в Dockerfile**: если процесс не под root, `mkdir` для `/app/logs/` может дать `PermissionError`. Решение: `RUN mkdir -p /app/logs && chown ...` в `Dockerfile`. Приоритет: средний. Этап: сессия 9.
+- **DT-08-6 — unit-тест `shapefile_dir=None` fallback**: нет проверки, что при `shapefile_dir=None` fallback строит `basedir/data/shapefiles`. Решение: 1 unit-тест в `tests/test_processing_layout_paths.py`. Приоритет: низкий. Этап: сессия 9.
+- **DT-08-7 — keyword-only сигнатура `collect_*`**: `shapefile_dir` стал вторым позиционным параметром; рискован для потенциальных external callers с positional args. Решение: добавить `*` в сигнатуры. Приоритет: низкий. Этап: сессия 9.
 
 ## 10. Инструкция для AI-ассистента
 
@@ -409,3 +432,10 @@ git push origin master
 - **Normalizing/preprocessing layer для GFS**: после v1, если прямой переход `gfs_downloader` → `collect_meteo_data` останется неудобным.
 - **Downstream validation перед `doc_builder.py`**: проверка day-level диапазонов (`wind_min ≤ wind_max` и т.д.); не блокирует v1.
 - **Soft quality rules**: физические диапазоны, NaN ratio thresholds, sanity checks для precipitation — warning-only layer после MVP `validate_outputs.py`.
+- **DT-07-1 — явный выбор GFS cycle**: CLI-параметр `--cycle` для `forecast_*.py`; CLI имеет приоритет над значением из `GFS_CYCLES`. Вне scope текущего change set (processing layer adaptation). Отдельная задача/PR. Этап: сессия 8.
+- **DT-08-1 — регистр `[Logging]` vs `[LOGGING]`**: `configparser` чувствителен к регистру секций; lookup `[Logging]` не находит `[LOGGING]` в конфиге. Feature `log_file` из конфига фактически нерабоча. Приоритет: низкий. Этап: сессия 9.
+- **DT-08-2 — одновременная запись в `hydromet.log`**: cron-пересечение morning + evening, один файл — строки могут чередоваться. Приоритет: средний. Этап: сессия 9.
+- **DT-08-3 — ротация логов**: `FileHandler` без ограничения; решение: `RotatingFileHandler(maxBytes=5MB, backupCount=7)`. Приоритет: средний. Этап: сессия 9.
+- **DT-08-4 — права `/app/logs/` в Dockerfile**: процесс не под root — `mkdir` может дать `PermissionError`. Решение: `RUN mkdir -p /app/logs && chown ...`. Приоритет: средний. Этап: сессия 9.
+- **DT-08-6 — unit-тест `shapefile_dir=None` fallback**: нет проверки дефолтного пути; 1 unit-тест в `tests/test_processing_layout_paths.py`. Приоритет: низкий. Этап: сессия 9.
+- **DT-08-7 — keyword-only сигнатура `collect_*`**: `shapefile_dir` — второй positional-параметр; добавить `*` в сигнатуры для keyword-only принудительно. Приоритет: низкий. Этап: сессия 9.

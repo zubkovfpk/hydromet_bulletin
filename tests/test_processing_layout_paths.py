@@ -4,9 +4,14 @@ from utils.collect_meteo_data import (
     _normalize_cycle,
     _discover_gfs_nc_files,
     collect_meteo_data,
+    _resolve_shapefile_path as _resolve_meteo_shapefile_path,
     _resolve_gfs_data_dir,
 )
-from utils.collect_wave_data import _resolve_cmems_wave_dir, collect_wave_data
+from utils.collect_wave_data import (
+    _resolve_cmems_wave_dir,
+    _resolve_shapefile_path as _resolve_wave_shapefile_path,
+    collect_wave_data,
+)
 
 
 def test_resolve_gfs_data_dir_prefers_new_layout(tmp_path):
@@ -144,3 +149,52 @@ def test_collect_wave_data_raises_file_not_found_for_absent_dirs(tmp_path):
     msg = str(exc_info.value)
     assert f"run_date={run_date}" in msg
     assert "Checked:" in msg
+
+
+def test_resolve_shapefile_path_uses_structured_dir(tmp_path):
+    shapefile_dir = tmp_path / "data" / "shapefiles"
+    expected = shapefile_dir / "Kasp_Sea" / "Kasp_Sea.shp"
+    assert _resolve_meteo_shapefile_path(str(shapefile_dir)) == expected
+    assert _resolve_wave_shapefile_path(str(shapefile_dir)) == expected
+
+
+def test_collect_meteo_data_raises_file_not_found_for_missing_shapefile(tmp_path):
+    run_date = "20260415"
+    cycle = "00z"
+    gfs_dir = tmp_path / "data" / "storage" / "gfs" / run_date / cycle
+    gfs_dir.mkdir(parents=True)
+    (gfs_dir / "one.nc").write_text("x", encoding="utf-8")
+
+    shapefile_dir = tmp_path / "data" / "shapefiles"
+    shapefile_dir.mkdir(parents=True)
+
+    with pytest.raises(FileNotFoundError) as exc_info:
+        collect_meteo_data(
+            base_dir=str(tmp_path),
+            shapefile_dir=str(shapefile_dir),
+            run_date=run_date,
+            cycle=cycle,
+            gfs_storage_subdir="data/storage/gfs",
+            results_subdir="Meteo_Parser_2026/results",
+        )
+    assert "Shapefile not found:" in str(exc_info.value)
+
+
+def test_collect_wave_data_raises_file_not_found_for_missing_shapefile(tmp_path):
+    run_date = "20260415"
+    cmems_dir = tmp_path / "data" / "storage" / "cmems" / run_date
+    cmems_dir.mkdir(parents=True)
+    (cmems_dir / "one.nc").write_text("x", encoding="utf-8")
+
+    shapefile_dir = tmp_path / "data" / "shapefiles"
+    shapefile_dir.mkdir(parents=True)
+
+    with pytest.raises(FileNotFoundError) as exc_info:
+        collect_wave_data(
+            base_dir=str(tmp_path),
+            shapefile_dir=str(shapefile_dir),
+            run_date=run_date,
+            cmems_storage_subdir="data/storage/cmems",
+            waves_dir="waves",
+        )
+    assert "Shapefile not found:" in str(exc_info.value)

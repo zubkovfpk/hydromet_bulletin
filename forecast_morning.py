@@ -68,6 +68,11 @@ def run_morning(cfg: configparser.ConfigParser,
     t_start = time.time()
     _configure_logging(cfg)
     base_dir = cfg.get("General", "basedir", fallback=".")
+    shapefile_dir = cfg.get(
+        "General",
+        "shapefile_dir",
+        fallback=str(Path(base_dir) / "data" / "shapefiles"),
+    )
     out_dir  = cfg.get("General", "output_dir", fallback="./output")
     gfs_storage_subdir = cfg.get("GFS_STORAGE", "GFS_OUTPUT_DIR", fallback="data/storage/gfs")
     cmems_storage_subdir = cfg.get("CMEMS_STORAGE", "CMEMS_OUTPUT_DIR", fallback="data/storage/cmems")
@@ -79,6 +84,7 @@ def run_morning(cfg: configparser.ConfigParser,
         logger.info("Загрузка метеоданных GFS...")
         meteo = collect_meteo_data(
             base_dir=base_dir,
+            shapefile_dir=shapefile_dir,
             run_date=run_date,
             cycle=gfs_cycle,
             gfs_storage_subdir=gfs_storage_subdir,
@@ -87,6 +93,7 @@ def run_morning(cfg: configparser.ConfigParser,
         logger.info("Загрузка данных о волнении CMEMS...")
         HWave, start_date, end_date = collect_wave_data(
             base_dir=base_dir,
+            shapefile_dir=shapefile_dir,
             run_date=run_date,
             cmems_storage_subdir=cmems_storage_subdir,
         )

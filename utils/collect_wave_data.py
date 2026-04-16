@@ -25,6 +25,10 @@ def _hours_to_date(hours: float) -> datetime:
 
 def _build_mask(lon_grid: np.ndarray, lat_grid: np.ndarray,
                 shapefile_path: str) -> np.ndarray:
+    shp_path = Path(shapefile_path)
+    if not shp_path.exists():
+        raise FileNotFoundError(f"Shapefile not found: {shp_path}")
+
     gdf = gpd.read_file(shapefile_path)
     union = gdf.unary_union
     mask = np.zeros(lon_grid.shape, dtype=bool)
@@ -52,11 +56,20 @@ def _resolve_cmems_wave_dir(
     return Path(base_dir) / legacy_waves_dir
 
 
+def _resolve_shapefile_path(shapefile_dir: str) -> Path:
+    """
+    Resolve shapefile path using structured directory layout:
+
+    data/shapefiles/Kasp_Sea/Kasp_Sea.shp
+    """
+    return Path(shapefile_dir) / "Kasp_Sea" / "Kasp_Sea.shp"
+
+
 def collect_wave_data(
     base_dir: str = ".",
+    shapefile_dir: str | None = None,
     waves_dir: str = "waves",
     cmems_storage_subdir: str = "data/storage/cmems",
-    shapefile: str = "Kasp_Sea.shp",
     lon_bounds: tuple = (46, 55),
     lat_bounds: tuple = (42, 48),
     run_date: str | None = None,
@@ -67,9 +80,9 @@ def collect_wave_data(
     Parameters
     ----------
     base_dir   : str   — корневая папка проекта
+    shapefile_dir   : str | None — путь к каталогу shapefiles; если None — %(basedir)s/data/shapefiles
     waves_dir  : str   — legacy подпапка с .nc файлами волн
     cmems_storage_subdir : str — путь к новому CMEMS storage относительно base_dir
-    shapefile  : str   — контур акватории
     lon_bounds : tuple — (min_lon, max_lon) для обрезки
     lat_bounds : tuple — (min_lat, max_lat) для обрезки
     run_date   : str | None — дата запуска 'YYYYMMDD'; если None — сегодня
@@ -82,6 +95,8 @@ def collect_wave_data(
     """
     if run_date is None:
         run_date = date.today().strftime("%Y%m%d")
+    if shapefile_dir is None:
+        shapefile_dir = str(Path(base_dir) / "data" / "shapefiles")
 
     wave_path = _resolve_cmems_wave_dir(
         base_dir=base_dir,
@@ -95,6 +110,10 @@ def collect_wave_data(
             f"No CMEMS .nc files found for run_date={run_date}. "
             f"Checked: {wave_path}"
         )
+
+    shp_path = _resolve_shapefile_path(shapefile_dir)
+    if not shp_path.exists():
+        raise FileNotFoundError(f"Shapefile not found: {shp_path}")
 
     # Глобальный буфер: 4320×2041×40 (как в оригинале)
     # Размер определим по первому файлу
@@ -140,7 +159,6 @@ def collect_wave_data(
     Lat = Lat_raw.T
 
     # Маска акватории
-    shp_path = Path(base_dir) / shapefile
     mask = _build_mask(Lon, Lat, str(shp_path))
 
     # Агрегация: 8 шагов × 3ч = 24ч → 5 суток

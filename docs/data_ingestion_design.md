@@ -87,9 +87,9 @@
   - `[STORAGE]`: `work_dir`, `storage_dir`;
   - `[LOGGING]`: `log_level`, `alert_channel`.
 - **Вызывает функции из `utils/`:**
-  - `utils.collect_wave_data.collect_wave_data(base_dir=..., waves_dir=..., shapefile=..., lon_bounds=..., lat_bounds=...)` как этап валидации совместимости и проверка читаемости итоговых `.nc`.
+  - `utils.collect_wave_data.collect_wave_data(base_dir=..., waves_dir=..., shapefile_dir=..., lon_bounds=..., lat_bounds=...)` как этап валидации совместимости и проверка читаемости итоговых `.nc`.
 - **Читает/пишет:**
-  - читает: удаленный CMEMS endpoint, локальный shapefile (`Kasp_Sea.*`), `config.ini`;
+  - читает: удаленный CMEMS endpoint, локальный shapefile (`data/shapefiles/Kasp_Sea/Kasp_Sea.*`), `config.ini`;
   - пишет: сырые `.nc` в `data/raw/cmems/` (или в совместимый каталог `waves/` как publish-этап), кеш промежуточных проверок в `data/cache/cmems/`, логи в `logs/`.
 
 #### `utils/downloaders/gfs_downloader.py` (новый)
@@ -108,7 +108,7 @@
   - `[GFS_STORAGE]`: `GFS_WORK_DIR`, `GFS_OUTPUT_DIR`;
   - `[GFS_LOGGING]`: `GFS_LOG_LEVEL`, `GFS_ALERT_CHANNEL`.
 - **Вызывает функции из `utils/`:**
-  - `utils.collect_meteo_data.collect_meteo_data(base_dir=..., results_subdir=..., shapefile=..., run_date=...)` как проверка совместимости структуры и наличия требуемых переменных для downstream.
+  - `utils.collect_meteo_data.collect_meteo_data(base_dir=..., results_subdir=..., shapefile_dir=..., run_date=...)` как проверка совместимости структуры и наличия требуемых переменных для downstream.
 - **Читает/пишет:**
   - читает: NOAA endpoint, `config.ini`, возможные прокси/секреты из окружения;
   - пишет: сырье в `data/raw/gfs/`, конвертированные/подготовленные файлы в `data/cache/gfs/` или совместимый каталог `Meteo_Parser_2026/results/<YYYYMMDD>/`, логи в `logs/`.
