@@ -27,16 +27,28 @@ from utils import (
 from utils.validate_outputs import assert_valid_for_bulletin
 
 # ── Логирование ──────────────────────────────────────────────────────────────
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)-8s  %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler("/app/logs/hydromet.log", encoding="utf-8"),
-    ],
-)
 logger = logging.getLogger(__name__)
+
+
+def _configure_logging(cfg: configparser.ConfigParser) -> None:
+    base_dir = cfg.get("General", "basedir", fallback=".")
+    log_file = (
+        cfg.get("General", "log_file", fallback="").strip()
+        or cfg.get("Logging", "log_file", fallback="").strip()
+    )
+    log_path = Path(log_file) if log_file else Path(base_dir) / "logs" / "hydromet.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s  %(levelname)-8s  %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler(log_path, encoding="utf-8"),
+        ],
+        force=True,
+    )
 
 
 def run_morning(cfg: configparser.ConfigParser,
@@ -54,6 +66,7 @@ def run_morning(cfg: configparser.ConfigParser,
     Путь к созданному .docx или None при ошибке.
     """
     t_start = time.time()
+    _configure_logging(cfg)
     base_dir = cfg.get("General", "basedir", fallback=".")
     out_dir  = cfg.get("General", "output_dir", fallback="./output")
     gfs_storage_subdir = cfg.get("GFS_STORAGE", "GFS_OUTPUT_DIR", fallback="data/storage/gfs")
