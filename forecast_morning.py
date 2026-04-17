@@ -82,6 +82,11 @@ def run_morning(cfg: configparser.ConfigParser,
         # ── 1. Загрузка данных ────────────────────────────────────────────
         logger.info("=== Утренний бюллетень: старт ===")
         logger.info("Загрузка метеоданных GFS...")
+        # DT-01: конвертация GRIB2 -> NetCDF перед чтением processing layer
+        from utils.downloaders.gfs_downloader import GFSDownloader
+        _gfs_dl = GFSDownloader(cfg=cfg, logger=logger)
+        _converted = _gfs_dl.convert_existing(date=run_date, cycle=gfs_cycle)
+        logger.info("GFS GRIB2→NetCDF pre-conversion: %d files", _converted)
         meteo = collect_meteo_data(
             base_dir=base_dir,
             shapefile_dir=shapefile_dir,

@@ -187,6 +187,42 @@ class GFSDownloader:
             return True
         return self._convert_grib_to_netcdf(grib_path, nc_path)
 
+    def convert_existing(self, date: str, cycle: str) -> int:
+        """Convert already-downloaded GRIB2 files to NetCDF.
+
+        Используется когда GRIB2 уже скачаны, но .nc ещё не созданы.
+        Возвращает количество успешно конвертированных файлов.
+        """
+        if not self.enable_netcdf_conversion:
+            self.logger.info("GFS NetCDF conversion disabled, skipping.")
+            return 0
+
+        cycle_num = cycle.lower().replace("z", "").strip()
+        out_dir = self.storage_dir / date / f"{cycle_num}z"
+
+        if not out_dir.exists():
+            self.logger.warning("GFS storage dir not found: %s", out_dir)
+            return 0
+
+        grib_files = sorted(out_dir.glob("gfs.t*.pgrb2.0p25.f*"))
+        if not grib_files:
+            self.logger.warning("No GRIB2 files found in: %s", out_dir)
+            return 0
+
+        self.logger.info(
+            "GFS converting %d GRIB2 files for %s/%s",
+            len(grib_files), date, cycle
+        )
+        converted = 0
+        for grib_path in grib_files:
+            if self._ensure_netcdf_for_grib(grib_path):
+                converted += 1
+
+        self.logger.info(
+            "GFS conversion complete: %d/%d files", converted, len(grib_files)
+        )
+        return converted
+
     # ------------------------------------------------------------------
     # Основной метод
     # ------------------------------------------------------------------

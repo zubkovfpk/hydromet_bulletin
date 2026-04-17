@@ -1627,10 +1627,46 @@ GFS_ENABLE_CONVERSION_TO_NETCDF = true
 
 ---
 
-### Изменения, внесённые в рамках сессии 10
+### Изменения, внесённые в рамках сессии 10 (первый коммит: 52ce625)
 
 - `utils/downloaders/gfs_downloader.py` — реализация DT-01: `_CFGRIB_TO_PROCESSING_NAMES`, `_convert_grib_to_netcdf`, `_normalize_cfgrib_dataset`, `_ensure_netcdf_for_grib`, `_netcdf_output_path`; download loop рефакторен (Cursor).
 - `forecast_morning.py` — import-fix из сессии 9 (Cursor, uncommitted из сессии 9).
 - `docs/project_context.md` — разделы 2, 5, 9, 11.3 обновлены: контракт ingestion/processing, DT-01 с вариантами A/B/C и DoD (Windsurf).
 - `docs/project_progress.md` — DT-01 закрыт, DT-10-1/2 добавлены, сессия 10 в хронологии (Windsurf).
 - `docs/conversation_history.md` — добавлена эта запись (Windsurf).
+
+---
+
+### 6. Дополнение (post-commit): convert_existing + pre-conversion hook (Cursor)
+
+После первого коммита сессии 10 Cursor внёс дополнительные изменения:
+
+**`gfs_downloader.py` — новый метод `convert_existing(date, cycle)`:**
+
+Метод для конвертации уже скачанных GRIB2-файлов без повторного скачивания. Использует `glob("gfs.t*.pgrb2.0p25.f*")` в `storage_dir/date/cyclez/`, вызывает `_ensure_netcdf_for_grib` для каждого файла. Возвращает количество успешно конвертированных файлов. Уважает флаг `enable_netcdf_conversion`.
+
+**`forecast_morning.py` — pre-conversion hook:**
+
+Перед вызовом `collect_meteo_data` добавлен вызов:
+
+```python
+from utils.downloaders.gfs_downloader import GFSDownloader
+_gfs_dl = GFSDownloader(cfg=cfg, logger=logger)
+_converted = _gfs_dl.convert_existing(date=run_date, cycle=gfs_cycle)
+logger.info("GFS GRIB2→NetCDF pre-conversion: %d files", _converted)
+```
+
+#### Arch Review (Windsurf) — дополнение
+
+**Вердикт: Conditional Approve** — 2 OK, 3 Minor risk, 1 Concern.
+
+| Пункт | Статус | Наблюдение |
+|-------|--------|-----------|
+| `convert_existing` живёт в ingestion layer | ✅ OK | Метод в `GFSDownloader`, DRY через `_ensure_netcdf_for_grib` |
+| Флаг `enable_netcdf_conversion` уважается | ✅ OK | Early return с `return 0` при disabled |
+| Import внутри тела функции `run_morning` | ⚠️ Minor | `from utils.downloaders...` внутри функции — нестандартный стиль; должен быть на уровне модуля |
+| Asymmetry morning/evening | ⚠️ Minor | `forecast_morning.py` обновлён, `forecast_evening.py` — нет; при вечернем запуске конвертация не происходит |
+| Coupling forecast → downloader | ⚠️ Minor | Bulletin-скрипт напрямую инстанцирует `GFSDownloader` — нарушение separation of concerns; в идеале вся конвертация в `fetch_inputs.py` |
+| Нет unit-теста `convert_existing` | concern | `test_gfs_netcdf_conversion.py` создан, но охватывает ли `convert_existing` — неизвестно без чтения файла |
+
+**Новый deferred item зафиксирован: DT-10-3** (симметрия `forecast_evening.py`) — см. `docs/project_progress.md`.

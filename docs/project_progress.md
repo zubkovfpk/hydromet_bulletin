@@ -74,6 +74,7 @@ pie
 | DT-01 | ~~**[Blocker #3]**~~ **Закрыт в сессии 10.** GFS GRIB2 → NetCDF conversion: реализован Вариант A (`_convert_grib_to_netcdf` в `gfs_downloader.py`, sidecar `.nc`). Arch review: Approve. Требует верификации dry-runом после `GFS_ENABLE_CONVERSION_TO_NETCDF = true` в `config.ini`. | — | Закрыт |
 | DT-10-1 | Unit/integration тест `_convert_grib_to_netcdf` с реальным `.pgrb2` — проверка маппинга переменных на реальных данных | medium | Сессия 11 |
 | DT-10-2 | Изменить default `GFS_ENABLE_CONVERSION_TO_NETCDF` в `config.example.ini` с `false` на `true` | low | Сессия 11 |
+| DT-10-3 | Симметрия `forecast_evening.py`: добавить `GFSDownloader.convert_existing()` pre-conversion hook аналогично `forecast_morning.py`. Без этого вечерний dry-run упадёт на том же `FileNotFoundError`. | **high** | Сессия 11 |
 | DT-02 | Normalizing/preprocessing layer для GFS | medium | После Processing layer adaptation |
 | DT-03 | Downstream validation перед `doc_builder.py` | low | После validate_outputs v1 |
 | DT-04 | Soft quality rules (физ. диапазоны, NaN ratio, sanity checks) | low | После MVP validate_outputs |
