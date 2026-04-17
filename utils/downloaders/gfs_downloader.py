@@ -6,7 +6,6 @@ import configparser
 import logging
 import time
 from pathlib import Path
-from urllib.parse import urlencode
 
 import requests
 
@@ -21,6 +20,18 @@ class GFSDownloader:
     - [GFS_STORAGE]
     - [GFS_VALIDATION]
     """
+
+    _CFGRIB_TO_PROCESSING_NAMES = {
+        "t": "Temperature_surface",
+        "crain": "Categorical_Rain_surface",
+        "cfrzr": "Categorical_Freezing_Rain_surface",
+        "cicep": "Categorical_Ice_Pellets_surface",
+        "csnow": "Categorical_Snow_surface",
+        "gust": "Wind_speed_gust_surface",
+        "u10": "u-component_of_wind_height_above_ground",
+        "v10": "v-component_of_wind_height_above_ground",
+        "vis": "Visibility_surface",
+    }
 
     def __init__(
         self,
@@ -64,6 +75,10 @@ class GFSDownloader:
             self.cfg.getint("GFS_VALIDATION", "GFS_MIN_EXPECTED_FILES", fallback=40)
             if self.cfg.has_section("GFS_VALIDATION") else 40
         )
+        self.enable_netcdf_conversion = (
+            self.cfg.getboolean("GFS_VALIDATION", "GFS_ENABLE_CONVERSION_TO_NETCDF", fallback=True)
+            if self.cfg.has_section("GFS_VALIDATION") else True
+        )
 
     # ------------------------------------------------------------------
     # Вспомогательные методы
@@ -103,6 +118,75 @@ class GFSDownloader:
 
         return params
 
+    def _netcdf_output_path(self, grib_path: Path) -> Path:
+        """Build sidecar .nc path next to GRIB2 file."""
+        return Path(f"{grib_path}.nc")
+
+    def _normalize_cfgrib_dataset(self, dataset):
+        """Normalize cfgrib dataset to names expected by processing layer."""
+        rename_dims: dict[str, str] = {}
+        if "latitude" in dataset.dims:
+            rename_dims["latitude"] = "lat"
+        if "longitude" in dataset.dims:
+            rename_dims["longitude"] = "lon"
+        if rename_dims:
+            dataset = dataset.rename(rename_dims)
+
+        rename_vars = {
+            key: val
+            for key, val in self._CFGRIB_TO_PROCESSING_NAMES.items()
+            if key in dataset.variables
+        }
+        if rename_vars:
+            dataset = dataset.rename(rename_vars)
+        return dataset
+
+    def _convert_grib_to_netcdf(self, grib_path: Path, nc_path: Path) -> bool:
+        """Convert one GFS GRIB2 file to NetCDF for processing layer."""
+        try:
+            import cfgrib  # type: ignore
+            import xarray as xr  # type: ignore
+        except ImportError:
+            self.logger.exception(
+                "GFS NetCDF conversion dependency missing for %s. "
+                "Install cfgrib+xarray+eccodes.",
+                grib_path.name,
+            )
+            return False
+
+        try:
+            datasets = cfgrib.open_datasets(
+                str(grib_path),
+                backend_kwargs={"indexpath": ""},
+            )
+            if not datasets:
+                self.logger.error("GFS NetCDF conversion returned no datasets: %s", grib_path.name)
+                return False
+
+            normalized = [self._normalize_cfgrib_dataset(ds) for ds in datasets]
+            merged = xr.merge(normalized, compat="override", join="outer")
+            merged.to_netcdf(nc_path)
+            self.logger.info("GFS NetCDF created: %s", nc_path.name)
+            return nc_path.exists() and nc_path.stat().st_size > 0
+        except Exception:
+            self.logger.exception("GFS NetCDF conversion failed: %s", grib_path.name)
+            return False
+
+    def _ensure_netcdf_for_grib(self, grib_path: Path) -> bool:
+        """
+        Ensure sidecar NetCDF exists for downloaded GRIB2 file.
+
+        When conversion is disabled, keeps previous GRIB2-only behavior.
+        """
+        if not self.enable_netcdf_conversion:
+            return True
+
+        nc_path = self._netcdf_output_path(grib_path)
+        if nc_path.exists() and nc_path.stat().st_size > 0:
+            self.logger.info("GFS NetCDF skip (exists): %s", nc_path.name)
+            return True
+        return self._convert_grib_to_netcdf(grib_path, nc_path)
+
     # ------------------------------------------------------------------
     # Основной метод
     # ------------------------------------------------------------------
@@ -133,45 +217,51 @@ class GFSDownloader:
             params      = self._build_query(date, cycle_num, fxx)
             file_name   = params["file"]
             target_path = out_dir / file_name
-            downloaded  = False
+            grib_ready = False
 
             if target_path.exists() and target_path.stat().st_size > 0:
                 self.logger.info("GFS skip (exists): %s", file_name)
-                success_count += 1
+                grib_ready = True
+
+            if not grib_ready:
+                for attempt in range(1, self.max_retries + 1):
+                    try:
+                        with session.get(
+                            self.main_url,
+                            params=params,
+                            timeout=self.timeout_seconds,
+                            stream=True,
+                        ) as response:
+                            response.raise_for_status()
+                            with target_path.open("wb") as fh:
+                                for chunk in response.iter_content(chunk_size=1024 * 1024):
+                                    if chunk:
+                                        fh.write(chunk)
+
+                        if target_path.stat().st_size > 0:
+                            self.logger.info("GFS OK: %s", file_name)
+                            grib_ready = True
+                        else:
+                            self.logger.error("GFS empty file: %s", file_name)
+
+                        break
+
+                    except Exception:
+                        self.logger.exception(
+                            "GFS failed: %s attempt=%d/%d", file_name, attempt, self.max_retries
+                        )
+                        if attempt < self.max_retries:
+                            time.sleep(self.retry_delay_seconds)
+
+            if not grib_ready:
+                self.logger.error("GFS retries exhausted: %s", file_name)
                 continue
 
-            for attempt in range(1, self.max_retries + 1):
-                try:
-                    with session.get(
-                        self.main_url,
-                        params=params,
-                        timeout=self.timeout_seconds,
-                        stream=True,
-                    ) as response:
-                        response.raise_for_status()
-                        with target_path.open("wb") as fh:
-                            for chunk in response.iter_content(chunk_size=1024 * 1024):
-                                if chunk:
-                                    fh.write(chunk)
+            if not self._ensure_netcdf_for_grib(target_path):
+                self.logger.error("GFS NetCDF missing after conversion: %s", target_path.name)
+                continue
 
-                    if target_path.stat().st_size > 0:
-                        self.logger.info("GFS OK: %s", file_name)
-                        downloaded = True
-                        success_count += 1
-                    else:
-                        self.logger.error("GFS empty file: %s", file_name)
-
-                    break
-
-                except Exception:
-                    self.logger.exception(
-                        "GFS failed: %s attempt=%d/%d", file_name, attempt, self.max_retries
-                    )
-                    if attempt < self.max_retries:
-                        time.sleep(self.retry_delay_seconds)
-
-            if not downloaded:
-                self.logger.error("GFS retries exhausted: %s", file_name)
+            success_count += 1
 
         for idx_file in out_dir.glob("*.idx"):
             idx_file.unlink()

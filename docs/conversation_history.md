@@ -1529,3 +1529,108 @@ Checked: \app\Meteo_Parser_2026\results\20260416
 - `forecast_morning.py` — исправлен импорт `collect_meteo_data` / `collect_wave_data` на явный функциональный (Cursor).
 - `docs/project_progress.md` — сессия 9 добавлена в хронологию; DT-01 повышен до Blocker #3; "Следующий этап" переименован в "сессия 10"; план сессии 10 зафиксирован (Windsurf).
 - `docs/conversation_history.md` — добавлена эта запись (Windsurf).
+
+---
+
+## Сессия 10 — 17.04.2026
+
+### Контекст
+
+Архитектурное сопровождение реализации DT-01 (GFS GRIB2 → NetCDF conversion). Цель: зафиксировать контракт ingestion/processing в docs до вмешательства Cursor, провести arch review реализации, обновить документацию. Роли: Cursor (implementation), Windsurf (pre-work docs + arch review), Comet (координация).
+
+---
+
+### 1. Pre-work (Windsurf): обновление docs/project_context.md
+
+До реализации Cursor зафиксированы в `docs/project_context.md`:
+
+- **Раздел 2**: исправлено описание `collect_meteo_data.py` — «разбор GFS GRIB2» → «читает GFS NetCDF (`*.nc`)» (было фактически неверно).
+- **Раздел 5**: добавлен явный архитектурный контракт:
+
+  > Ingestion layer (`gfs_downloader.py`) отвечает за скачивание GFS и **за приведение данных к формату `.nc`** перед тем, как они попадут в processing layer. Processing layer (`collect_meteo_data.py`) работает исключительно с `*.nc`-файлами и ничего не знает о формате GRIB2.
+
+- **Раздел 9 (DT-01)**: обновлён до Blocker #3 с вариантами A/B/C и Definition of Done.
+- **Раздел 11.3**: обновлено краткое описание DT-01 в списке текущих deferred items.
+
+---
+
+### 2. Реализация DT-01 (Cursor)
+
+Реализован Вариант A: конвертация в ingestion layer, в `gfs_downloader.py`.
+
+**Новые компоненты:**
+
+- `_CFGRIB_TO_PROCESSING_NAMES` — маппинг cfgrib short name → имена переменных processing layer (9 переменных).
+- `_netcdf_output_path(grib_path)` → `{grib_path}.nc` (sidecar-файл рядом с GRIB2).
+- `_normalize_cfgrib_dataset(ds)` → переименование dims (`latitude→lat`, `longitude→lon`) + vars по маппингу.
+- `_convert_grib_to_netcdf(grib_path, nc_path)` → `cfgrib.open_datasets` → normalize → `xr.merge` → `to_netcdf`. Lazy import cfgrib/xarray внутри метода; `ImportError` обрабатывается.
+- `_ensure_netcdf_for_grib(grib_path)` → идемпотентный вызов: skip если `.nc` уже существует; уважает флаг `enable_netcdf_conversion`.
+- Конфиг-флаг `GFS_ENABLE_CONVERSION_TO_NETCDF` в `[GFS_VALIDATION]` (code default: `True`).
+
+**Изменение логики download:**
+`downloaded` → `grib_ready`; `success_count` инкрементируется только после успешной конвертации. `continue` на провале конвертации.
+
+---
+
+### 3. Arch Review (Windsurf)
+
+**Вердикт: Approve** — 11 OK, 3 Minor risk.
+
+| Пункт | Статус | Наблюдение |
+|-------|--------|-----------|
+| Живёт в ingestion layer | ✅ OK | Весь код в `gfs_downloader.py`, processing layer не тронут |
+| Контракт `*.nc` сохранён | ✅ OK | `_discover_gfs_nc_files` найдёт `*.pgrb2.nc` через `glob("*.nc")` |
+| Lazy import cfgrib/xarray | ✅ OK | Import внутри метода, не на уровне модуля |
+| ImportError handled | ✅ OK | Логирует и возвращает False; не крашит download loop |
+| Идемпотентность `.nc` skip | ✅ OK | `nc_path.exists() and size>0` перед конвертацией |
+| Config flag отключения | ✅ OK | `GFS_ENABLE_CONVERSION_TO_NETCDF`; rollback без правки кода |
+| Маппинг переменных (9 штук) | ✅ OK | Совпадает с ключами `accum` в `collect_meteo_data.py` |
+| Rename dims lat/lon | ✅ OK | `latitude→lat`, `longitude→lon` |
+| Sidecar `.nc` naming | ✅ OK | `*.pgrb2.nc` попадает под `glob("*.nc")` |
+| requirements.txt | ✅ OK | `cfgrib`, `xarray`, `eccodes` уже присутствуют |
+| GRIB2 skip path → conversion | ✅ OK | Существующий GRIB2 тоже конвертируется при повторном запуске |
+| `xr.merge(compat="override")` | ⚠️ Minor | При пересечении переменных между cfgrib-датасетами — последний побеждает молча |
+| `urlencode` import removed | ⚠️ Minor | Импорт убран; нужно убедиться, что не используется в неизменённых частях файла (скорее всего безопасно, requests сам кодирует params) |
+| Discrepancy code default vs config.example.ini | ⚠️ Minor | Code: `fallback=True`; `config.example.ini`: `false` — при копировании шаблона конвертация **выключена** по умолчанию; для dry-run пользователь должен выставить `true` в своём `config.ini` |
+
+**Blocking issues: нет.**
+
+---
+
+### 4. Обязательные действия пользователя перед dry-run
+
+В локальном `config.ini` установить:
+
+```ini
+[GFS_VALIDATION]
+GFS_ENABLE_CONVERSION_TO_NETCDF = true
+```
+
+Без этого конвертация не запустится (config.example.ini имеет `false`).
+
+---
+
+### 5. Новые deferred items сессии 10
+
+| ID | Задача | Приоритет |
+|----|--------|-----------|
+| DT-10-1 | Unit/integration тест `_convert_grib_to_netcdf` с реальным `.pgrb2` — проверка маппинга переменных на реальных данных | medium |
+| DT-10-2 | Рассмотреть изменение default в `config.example.ini` с `false` → `true` для `GFS_ENABLE_CONVERSION_TO_NETCDF` | low |
+
+---
+
+### Open questions → после dry-run
+
+- Запустить `fetch_inputs.py` с `GFS_ENABLE_CONVERSION_TO_NETCDF = true`, убедиться что `.nc` sidecar-файлы созданы.
+- Повторный dry-run `forecast_morning.py` — должен пройти стадию `collect_meteo_data` без `FileNotFoundError`.
+- Если cfgrib short names не совпали с ожидаемыми (`t` для temperature и т.п.) — уточнить маппинг и сделать follow-up fix.
+
+---
+
+### Изменения, внесённые в рамках сессии 10
+
+- `utils/downloaders/gfs_downloader.py` — реализация DT-01: `_CFGRIB_TO_PROCESSING_NAMES`, `_convert_grib_to_netcdf`, `_normalize_cfgrib_dataset`, `_ensure_netcdf_for_grib`, `_netcdf_output_path`; download loop рефакторен (Cursor).
+- `forecast_morning.py` — import-fix из сессии 9 (Cursor, uncommitted из сессии 9).
+- `docs/project_context.md` — разделы 2, 5, 9, 11.3 обновлены: контракт ingestion/processing, DT-01 с вариантами A/B/C и DoD (Windsurf).
+- `docs/project_progress.md` — DT-01 закрыт, DT-10-1/2 добавлены, сессия 10 в хронологии (Windsurf).
+- `docs/conversation_history.md` — добавлена эта запись (Windsurf).

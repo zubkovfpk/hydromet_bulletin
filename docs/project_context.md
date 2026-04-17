@@ -72,7 +72,7 @@ hydromet_bulletin/
 │
 └─ utils/
      __init__.py
-     collect_meteo_data.py      разбор GFS GRIB2, маскировка по shp, расчёт полей  done
+     collect_meteo_data.py      читает GFS NetCDF (*.nc), маскировка по shp, расчёт полей  done
      collect_wave_data.py       разбор CMEMS NetCDF (hs/tp/dp), агрегация           done
      doc_builder.py             конструктор Word-документа (заголовки, стили)       done
      email_sender.py            отправка .docx по SMTP SSL/TLS (порт 465)           done
@@ -145,6 +145,7 @@ hydromet_bulletin/
 - **Config**: `configparser.ConfigParser` (case-insensitive keys). Секции `CMEMS_*` и `GFS_*` разделены, общие `[DOWNLOAD]`/`[STORAGE]`/`[LOGGING]` — для CMEMS.
 - **CMEMS fallback policy**: при S3 нестабильности предпочтителен `cmems_download_mode=subset` (HTTP-only) для повышения production-стабильности.
 - **Shapefile storage policy**: шейп-файлы (`Kasp_Sea.*`) хранятся в `data/shapefiles/Kasp_Sea/`, не в корне проекта. Путь управляется через конфиг-ключ `shapefile_dir` в секции `[General]` (`%(basedir)s/data/shapefiles`). `collect_meteo_data()` и `collect_wave_data()` получают `shapefile_dir` как явный параметр.
+- **Контракт между ingestion layer и processing layer (формат данных GFS)**: ingestion layer (`gfs_downloader.py`) отвечает за скачивание GFS и **за приведение данных к формату `.nc`** перед тем, как они попадут в processing layer. Processing layer (`collect_meteo_data.py`) работает исключительно с `*.nc`-файлами и ничего не знает о формате GRIB2. Нарушение этого контракта (GRIB2 без конвертации) приводит к `FileNotFoundError` в `_discover_gfs_nc_files`. Реализация конвертации — DT-01, Blocker #3.
 - **GFS cycle selection — временная policy (DT-07-1, вариант B)**: при запуске `forecast_morning.py` / `forecast_evening.py` цикл GFS определяется как первый элемент из `GFS_CYCLES` в `[GFS_SOURCES]`:
   ```python
   gfs_cycle = cfg.get("GFS_SOURCES", "GFS_CYCLES", fallback="00z").split(",")[0].strip()
@@ -305,7 +306,11 @@ d63ae3a Baseline hydromet bulletin project (Python + Docker)
 
 ## 9. Deferred tasks / Future work
 
-- **GFS GRIB2 → NetCDF conversion / preprocessing**: не входит в `validate_outputs.py v1`; отдельная задача при переходе на unified NetCDF-pipeline.
+- **DT-01 — GFS GRIB2 → NetCDF conversion / preprocessing** ⚠️ **Blocker #3 для end-to-end dry-run (сессия 10)**: `gfs_downloader` скачивает `gfs.t00z.pgrb2.0p25.f006` (GRIB2), `collect_meteo_data` ищет `*.nc` — format mismatch блокирует pipeline. Выявлено при dry-run сессии 9. Варианты реализации:
+  - **A (рекомендован)**: конвертация в ingestion layer в `gfs_downloader.py` после скачивания (`cfgrib` + `xarray.to_netcdf()`). Processing layer не меняется.
+  - **B**: читать GRIB2 напрямую в `collect_meteo_data.py` через `cfgrib` — нарушает контракт processing layer, не рекомендуется.
+  - **C**: отдельный `utils/convert_gfs.py` как промежуточный шаг — минимальная инвазивность, но добавляет новый компонент.
+  Definition of Done: `_discover_gfs_nc_files` находит `*.nc` после `fetch_inputs.py`; dry-run `forecast_morning.py` проходит стадию `collect_meteo_data` без `FileNotFoundError`. Приоритет: **high**. Этап: сессия 10.
 - **Normalizing/preprocessing layer для GFS**: после v1, если прямой переход `gfs_downloader` → `collect_meteo_data` останется неудобным.
 - **Downstream validation перед `doc_builder.py`**: day-level проверка сформированных диапазонов (`wind_min ≤ wind_max` и т.д.); не блокирует v1.
 - **Soft quality rules**: физические диапазоны, NaN ratio thresholds, sanity checks для precipitation — warning-only layer после MVP.
@@ -428,7 +433,7 @@ git push origin master
 
 **Текущие deferred items:**
 
-- **GFS GRIB2 → NetCDF conversion / preprocessing**: не входит в `validate_outputs.py v1`; отдельная задача при переходе на unified NetCDF-pipeline.
+- **DT-01 — GFS GRIB2 → NetCDF conversion**: ⚠️ **Blocker #3 для dry-run** (сессия 10). Format mismatch: ingestion даёт GRIB2, processing ждёт `*.nc`. Вариант A: конвертация в ingestion layer после скачивания. Приоритет: high.
 - **Normalizing/preprocessing layer для GFS**: после v1, если прямой переход `gfs_downloader` → `collect_meteo_data` останется неудобным.
 - **Downstream validation перед `doc_builder.py`**: проверка day-level диапазонов (`wind_min ≤ wind_max` и т.д.); не блокирует v1.
 - **Soft quality rules**: физические диапазоны, NaN ratio thresholds, sanity checks для precipitation — warning-only layer после MVP `validate_outputs.py`.

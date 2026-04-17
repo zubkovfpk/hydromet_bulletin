@@ -15,9 +15,9 @@ import numpy as np
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from utils.collect_meteo_data import collect_meteo_data
+from utils.collect_wave_data import collect_wave_data
 from utils import (
-    collect_meteo_data,
-    collect_wave_data,
     wind_statistics,
     precip_statistics,
     temp_statistics_morning,

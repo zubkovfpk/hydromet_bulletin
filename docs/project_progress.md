@@ -56,6 +56,7 @@ gantt
 | 7 | 16.04.2026 | ~3 ч | Processing layer адаптирован под новый layout (GFS/CMEMS), legacy fallback, arch review Approve, follow-up правки |
 | 8 | 16.04.2026 | ~4 ч | DT-07-3 закрыт, Blocker #1 (logging) + Blocker #2 (shapefile) устранены, arch review ×2 Approve, DT-08-1..7 зафиксированы |
 | 9 | 16.04.2026 | ~2 ч | BOM-fix config.ini, import-fix collect_meteo_data, dry-run частично успешен, выявлен Blocker #3 (DT-01: GRIB2→NetCDF) |
+| 10 | 17.04.2026 | ~2 ч | DT-01 реализован (Вариант A), arch review Approve (3 Minor risk), контракт ingestion/processing зафиксирован в docs |
 
 ## Общий прогресс: ~70%
 
@@ -70,7 +71,9 @@ pie
 
 | ID | Задача | Приоритет | Этап |
 |----|--------|-----------|------|
-| DT-01 | **[Blocker #3 — Сессия 10]** GFS GRIB2 → NetCDF conversion / preprocessing. `gfs_downloader` скачивает `*.pgrb2`, `collect_meteo_data` ищет `*.nc` — format mismatch блокирует end-to-end dry-run. Решение: конвертация в ingestion layer после скачивания (`cfgrib` + `xarray.to_netcdf()`). | **high** | Сессия 10 |
+| DT-01 | ~~**[Blocker #3]**~~ **Закрыт в сессии 10.** GFS GRIB2 → NetCDF conversion: реализован Вариант A (`_convert_grib_to_netcdf` в `gfs_downloader.py`, sidecar `.nc`). Arch review: Approve. Требует верификации dry-runом после `GFS_ENABLE_CONVERSION_TO_NETCDF = true` в `config.ini`. | — | Закрыт |
+| DT-10-1 | Unit/integration тест `_convert_grib_to_netcdf` с реальным `.pgrb2` — проверка маппинга переменных на реальных данных | medium | Сессия 11 |
+| DT-10-2 | Изменить default `GFS_ENABLE_CONVERSION_TO_NETCDF` в `config.example.ini` с `false` на `true` | low | Сессия 11 |
 | DT-02 | Normalizing/preprocessing layer для GFS | medium | После Processing layer adaptation |
 | DT-03 | Downstream validation перед `doc_builder.py` | low | После validate_outputs v1 |
 | DT-04 | Soft quality rules (физ. диапазоны, NaN ratio, sanity checks) | low | После MVP validate_outputs |
@@ -86,14 +89,14 @@ pie
 | DT-08-6 | Нет unit-теста для `shapefile_dir=None` — проверки, что fallback строит `basedir/data/shapefiles`. Решение: добавить 1 unit-тест в `tests/test_processing_layout_paths.py`. | low | Сессия 9 |
 | DT-08-7 | `shapefile_dir` стал вторым позиционным параметром в `collect_meteo_data()` / `collect_wave_data()`, что рискованно для callers с positional args. Решение: добавить `*` в сигнатуры для принудительного keyword-only. | low | Сессия 9 |
 
-## Следующий этап (сессия 10)
+## Следующий этап (сессия 11)
 
-**Выполнено в сессии 9:**
-- BOM-fix: удалён UTF-8 BOM из `config.ini` — `configparser` больше не выдаёт `MissingSectionHeaderError` на `\ufeff[General]`.
-- Import-fix: в `forecast_morning.py` заменён некорректный `from utils import collect_meteo_data` на явный `from utils.collect_meteo_data import collect_meteo_data` (+ аналогично для `collect_wave_data`). `TypeError: 'module' object is not callable` устранён.
-- Dry-run `forecast_morning.py`: частично успешен — pipeline стартует, читает конфиг, инициализирует логирование, корректно валидирует отсутствие `.nc`-данных (fail-fast).
-- Выявлен Blocker #3: format mismatch GRIB2 vs NetCDF — DT-01 переведён в high-priority, запланирован на сессию 10.
+**Выполнено в сессии 10:**
+- Pre-work docs: `docs/project_context.md` обновлён — контракт ingestion/processing, DT-01 с вариантами A/B/C и DoD.
+- DT-01 реализован (Cursor): `_convert_grib_to_netcdf`, sidecar `.nc`, конфиг-флаг `GFS_ENABLE_CONVERSION_TO_NETCDF`.
+- Arch review Windsurf: Approve (11 OK, 3 Minor risk). Blocking issues: нет.
+- DT-10-1/2 зафиксированы.
 
-1. **Реализовать DT-01** — конвертация GRIB2 → NetCDF в ingestion layer (в `gfs_downloader.py`, `cfgrib` + `xarray.to_netcdf()`), чтобы `collect_meteo_data` находил `*.nc`. Arch review Windsurf после реализации.
-2. **Повторить dry-run** после закрытия DT-01 — полный проход `forecast_morning.py` на реальных данных.
+1. **Выставить** `GFS_ENABLE_CONVERSION_TO_NETCDF = true` в `config.ini`, запустить `fetch_inputs.py`, убедиться в создании `.nc` sidecar-файлов.
+2. **Повторить dry-run** `forecast_morning.py` — полный проход `collect_meteo_data` без `FileNotFoundError`.
 3. **Сравнение output `.docx` с эталоном** `matlab_original/Bulletin_example.docx`.
