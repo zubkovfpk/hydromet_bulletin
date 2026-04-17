@@ -306,11 +306,10 @@ d63ae3a Baseline hydromet bulletin project (Python + Docker)
 
 ## 9. Deferred tasks / Future work
 
-- **DT-01 — GFS GRIB2 → NetCDF conversion / preprocessing** ⚠️ **Blocker #3 для end-to-end dry-run (сессия 10)**: `gfs_downloader` скачивает `gfs.t00z.pgrb2.0p25.f006` (GRIB2), `collect_meteo_data` ищет `*.nc` — format mismatch блокирует pipeline. Выявлено при dry-run сессии 9. Варианты реализации:
-  - **A (рекомендован)**: конвертация в ingestion layer в `gfs_downloader.py` после скачивания (`cfgrib` + `xarray.to_netcdf()`). Processing layer не меняется.
-  - **B**: читать GRIB2 напрямую в `collect_meteo_data.py` через `cfgrib` — нарушает контракт processing layer, не рекомендуется.
-  - **C**: отдельный `utils/convert_gfs.py` как промежуточный шаг — минимальная инвазивность, но добавляет новый компонент.
-  Definition of Done: `_discover_gfs_nc_files` находит `*.nc` после `fetch_inputs.py`; dry-run `forecast_morning.py` проходит стадию `collect_meteo_data` без `FileNotFoundError`. Приоритет: **high**. Этап: сессия 10.
+- **DT-01 — GFS GRIB2 → NetCDF conversion / preprocessing** ✅ **Закрыт (сессия 10, MVP).** Реализован Вариант A: `_convert_grib_to_netcdf` + `convert_existing` в `gfs_downloader.py`, sidecar `.nc` рядом с GRIB2, 9 переменных с правильным маппингом, `lat`/`lon` дименсии. DoD подтверждён: `collect_meteo_data` находит 40/40 `.nc` и читает все 9 переменных в dry-run `forecast_morning.py --date 20260415`.
+- **DT-10-3 — Shape mismatch маски и данных** ⚠️ **Blocker #4 (сессия 11)**: маска в `_build_mask` строится через `Lon_raw.T` / `Lat_raw.T` → форма `(1440, 721)`; данные NetCDF — `(721, 1440, n_steps)`. `ValueError: operands could not be broadcast together with remapped shapes: (1440,721,1) and (721,1440,5)`. Архитектурный контракт ingestion/processing не меняется — баг находится внутри processing layer. Приоритет: **high**. Этап: сессия 11.
+- **DT-10-4**: `convert_existing()` glob `gfs.t*.pgrb2.0p25.f*` захватывает уже созданные sidecar `*.nc`-файлы (double-extension) и пытается парсить их как GRIB2 → `EOFError: No valid message found`. Решение: фильтровать glob строго, исключая пати с `.nc`-окончанием. Приоритет: medium. Этап: сессия 11.
+- **DT-10-5**: `_build_mask` использует Python-цикл по сетке 721×1440 (~1M итераций) через `shapely Point.within` — блокирует pipeline на несколько минут. Решение: векторизация через `geopandas.sjoin` или предварительный bbox-фильтр. Приоритет: medium. Этап: сессия 11.
 - **Normalizing/preprocessing layer для GFS**: после v1, если прямой переход `gfs_downloader` → `collect_meteo_data` останется неудобным.
 - **Downstream validation перед `doc_builder.py`**: day-level проверка сформированных диапазонов (`wind_min ≤ wind_max` и т.д.); не блокирует v1.
 - **Soft quality rules**: физические диапазоны, NaN ratio thresholds, sanity checks для precipitation — warning-only layer после MVP.
@@ -433,7 +432,10 @@ git push origin master
 
 **Текущие deferred items:**
 
-- **DT-01 — GFS GRIB2 → NetCDF conversion**: ⚠️ **Blocker #3 для dry-run** (сессия 10). Format mismatch: ingestion даёт GRIB2, processing ждёт `*.nc`. Вариант A: конвертация в ingestion layer после скачивания. Приоритет: high.
+- **DT-01 — GFS GRIB2 → NetCDF conversion**: ✅ **Закрыт (сессия 10, MVP).** Вариант A: `_convert_grib_to_netcdf` + `convert_existing` в `gfs_downloader.py`. DoD подтверждён dry-runом.
+- **DT-10-3 — Shape mismatch маски/данных**: ⚠️ **Blocker #4 (сессия 11)**. Маска `(1440,721)` vs данные `(721,1440,n)` в `collect_meteo_data._build_mask`. Приоритет: high.
+- **DT-10-4**: `convert_existing` glob захватывает sidecar `.nc` → `EOFError`. Фильтр глоба по GRIB2-расширениям. Приоритет: medium.
+- **DT-10-5**: `_build_mask` Python-цикл 721×1440 через shapely — несколько минут. Векторизация через geopandas/bbox. Приоритет: medium.
 - **Normalizing/preprocessing layer для GFS**: после v1, если прямой переход `gfs_downloader` → `collect_meteo_data` останется неудобным.
 - **Downstream validation перед `doc_builder.py`**: проверка day-level диапазонов (`wind_min ≤ wind_max` и т.д.); не блокирует v1.
 - **Soft quality rules**: физические диапазоны, NaN ratio thresholds, sanity checks для precipitation — warning-only layer после MVP `validate_outputs.py`.

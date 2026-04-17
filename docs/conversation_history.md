@@ -1669,4 +1669,71 @@ logger.info("GFS GRIB2→NetCDF pre-conversion: %d files", _converted)
 | Coupling forecast → downloader | ⚠️ Minor | Bulletin-скрипт напрямую инстанцирует `GFSDownloader` — нарушение separation of concerns; в идеале вся конвертация в `fetch_inputs.py` |
 | Нет unit-теста `convert_existing` | concern | `test_gfs_netcdf_conversion.py` создан, но охватывает ли `convert_existing` — неизвестно без чтения файла |
 
-**Новый deferred item зафиксирован: DT-10-3** (симметрия `forecast_evening.py`) — см. `docs/project_progress.md`.
+**Новый deferred item зафиксирован: DT-10-3** (симметрия `forecast_evening.py`) — переименован в DT-10-6 после финализации (DT-10-3 занят Blocker #4).
+
+---
+
+### 7. Финализация сессии 10: dry-run результаты и Blocker #4
+
+#### 7.1 Действия пользователя в PowerShell (подготовка окружения)
+
+- Создан venv под **Python 3.13**, установлены все зависимости из `requirements.txt`.
+- Проверен cfgrib: `py -c "import cfgrib; cfgrib.open_dataset(...)"` — OK, eccodes selfcheck PASSED.
+- В `config.ini` выставлено `GFS_ENABLE_CONVERSION_TO_NETCDF = true`.
+- Ручная проверка конвертации одного GRIB2: `py -c "from utils.downloaders.gfs_downloader import GFSDownloader; ..."` — `.nc` создан успешно.
+
+#### 7.2 Итерация исправления маппинга имён переменных
+
+- **Первый прогон** `convert_existing`: `.nc` создавались с cfgrib short names (`t`, `u10`, `v10`, `crain`, `cfrzr`, `cicep`, `csnow`, `gust`, `vis`) — `collect_meteo_data` не находил переменные с длинными именами (`Temperature_surface` и т.д.).
+- **Повторная конвертация** с явным `RENAME_VARS` в `_normalize_cfgrib_dataset`: переменные получили корректные длинные имена. Существующие `.nc` удалены вручную, `convert_existing` запущен повторно.
+- Итог: 40/40 `.nc` содержат переменные с правильными именами.
+
+#### 7.3 Follow-up fix: convert_existing + wiring в forecast_morning.py
+
+По промпту Comet Cursor реализовал:
+- `GFSDownloader.convert_existing(date, cycle)` — публичный метод для конвертации уже скачанных GRIB2 без повторного скачивания.
+- Интеграционный вызов в `forecast_morning.py` перед `collect_meteo_data`: инстанцирование `GFSDownloader`, вызов `convert_existing`, лог результата.
+
+#### 7.4 Первый end-to-end dry-run
+
+**Команда:** `py forecast_morning.py --date 20260415`
+
+**Результат:**
+- Конфиг читается ✅
+- `GFS_ENABLE_CONVERSION_TO_NETCDF = true` → `convert_existing` запускается ✅
+- 40 `.nc` sidecar-файлов найдены / конвертированы ✅
+- `collect_meteo_data` вызывается корректно ✅
+- `_discover_gfs_nc_files` находит 40 `.nc` ✅
+- Все 9 переменных загружаются из NetCDF ✅
+- **Pipeline падает ДАЛЬШЕ** — на broadcast маски:
+
+```
+ValueError: operands could not be broadcast together with remapped shapes:
+(1440,721,1) and requested shape (721,1440,5)
+```
+
+#### 7.5 Классификация нового падения
+
+**Причина:** В `_build_mask` маска строится из транспонированных meshgrid (`Lon_raw.T` / `Lat_raw.T`), что даёт форму `(1440, 721)`. Данные из NetCDF имеют форму `(721, 1440, n_steps)`. При попытке broadcast — `ValueError`.
+
+**Классификация:**
+- Баг лежит внутри processing layer (`collect_meteo_data._build_mask`) — **не затрагивает ingestion/processing контракт**.
+- DT-01 DoD выполнен: `_discover_gfs_nc_files` находит `.nc`, `collect_meteo_data` читает все 9 переменных.
+- Новый blocker: **DT-10-3 / Blocker #4** (сессия 11).
+
+#### 7.6 Решения и договорённости
+
+| Решение | Обоснование |
+|---------|------------|
+| DT-01 считается закрытым (MVP) | DoD выполнен: NC создаются, читаются; pipeline вышел за границу Blocker #3 |
+| Архитектурный контракт ingestion/processing остаётся в силе | Новый баг — внутри processing layer, не на границе слоёв |
+| DT-10-3 = Blocker #4 = shape mismatch маски | Блокирует дальнейший dry-run |
+| DT-10-4/5 — follow-up items (не blocking) | EOFError в convert_existing и медленный _build_mask |
+
+#### 7.7 Итоговые изменения, внесённые в рамках сессии 10 (все коммиты)
+
+| Коммит | Файлы | Содержание |
+|--------|-------|-----------|
+| 52ce625 | `gfs_downloader.py`, `forecast_morning.py`, `requirements.txt`, `tests/test_gfs_netcdf_conversion.py`, `docs/*` | DT-01 Вариант A, import-fix, arch review docs |
+| e64e046 | `gfs_downloader.py`, `forecast_morning.py`, `docs/*` | `convert_existing`, pre-conversion hook, DT-10-3 (evening) |
+| (текущий) | `docs/*` | Финализация: DT-01 закрыт MVP, DT-10-3..6, Blocker #4, план сессии 11 |
