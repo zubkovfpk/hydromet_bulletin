@@ -1736,4 +1736,61 @@ ValueError: operands could not be broadcast together with remapped shapes:
 |--------|-------|-----------|
 | 52ce625 | `gfs_downloader.py`, `forecast_morning.py`, `requirements.txt`, `tests/test_gfs_netcdf_conversion.py`, `docs/*` | DT-01 Вариант A, import-fix, arch review docs |
 | e64e046 | `gfs_downloader.py`, `forecast_morning.py`, `docs/*` | `convert_existing`, pre-conversion hook, DT-10-3 (evening) |
-| (текущий) | `docs/*` | Финализация: DT-01 закрыт MVP, DT-10-3..6, Blocker #4, план сессии 11 |
+| efd6fe6 | `docs/*` | Финализация: DT-01 закрыт MVP, DT-10-3..6, Blocker #4, план сессии 11 |
+
+---
+
+## Сессия 11 — 18.04.2026
+
+### Контекст
+
+Архитектурное сопровождение устранения Blocker #4 (DT-10-3: shape mismatch маски и данных в `collect_meteo_data`). Роли: Cursor (implementation), Windsurf (pre-work docs + arch review).
+
+---
+
+### 1. Pre-work (Windsurf): анализ и документирование до вмешательства Cursor
+
+#### 1.1 Подтверждение входного состояния
+
+- DT-01 ✅ закрыт (сессия 10, MVP): 40/40 `.nc`, все 9 переменных.
+- DT-10-3 / Blocker #4: `ValueError: remapped shapes: (1440,721,1) and (721,1440,5)`.
+- Открытые задачи: DT-10-1/2/4/5/6, DT-07-1, DT-08-1..7.
+
+#### 1.2 Анализ root cause (Windsurf, чтение `collect_meteo_data.py`)
+
+Точная диагностика по коду:
+
+| Строка | Код | Результат |
+|--------|-----|-----------|
+| 174–175 | `lat_arr = ds.variables["lat"][:].data` | `lat_arr.shape = (721,)` |
+| 174–175 | `lon_arr = ds.variables["lon"][:].data` | `lon_arr.shape = (1440,)` |
+| 178 | `np.stack(v, axis=2)` | `stacked[key].shape = (721, 1440, n_steps)` — lat-first, NetCDF-стандарт |
+| 181 | `np.meshgrid(lon_arr, lat_arr)` | `Lon_raw.shape = (721, 1440)`, `Lat_raw.shape = (721, 1440)` |
+| 182–183 | `Lon = Lon_raw.T`, `Lat = Lat_raw.T` | `Lon.shape = (1440, 721)` — MATLAB-легаси |
+| 186 | `_build_mask(Lon, Lat, ...)` | `mask.shape = (1440, 721)` |
+| 205 | `broadcast_to(mask[:,:,np.newaxis], agg.shape)` | `(1440,721,1)` vs `(721,1440,5)` → **ValueError** |
+
+**Root cause**: строки 182–183 — MATLAB-legacy `.T` транспонирование meshgrid. Данные из NetCDF lat-first `(721,1440,n)`, маска из `.T` — lon-first `(1440,721)`. Несовместимость при broadcast.
+
+#### 1.3 Зафиксировано в docs
+
+**`docs/project_context.md`:**
+- Раздел 5: добавлен пункт «Каноническая ориентация осей в processing layer»:
+  - `(lat, lon, n_steps)` = `(721, 1440, n)` — NetCDF-стандарт, канонический для processing layer
+  - Маска `_build_mask` должна иметь форму `(lat, lon)` = `(721, 1440)`
+  - `.T` в meshgrid — MATLAB-легаси, нарушает ориентацию (Blocker #4)
+- Раздел 9 (DT-10-3): добавлены варианты A/B/C и DoD
+
+**`docs/project_progress.md`:**
+- DT-10-3 обновлён: варианты A/B/C, DoD
+- «Следующий этап (сессия 11)»: pre-work статус + конкретные задачи для Cursor
+
+#### 1.4 Варианты реализации DT-10-3
+
+| Вариант | Изменение | Инвазивность | Рекомендован |
+|---------|-----------|-------------|--------------|
+| **A** | Убрать `.T` на строках 182–183 `collect_meteo_data.py` | 2 строки | ✅ Да |
+| B | Транспонировать stacked-данные `np.transpose(stacked, (1,0,2))` | Больше | Нет |
+| C | Векторизация `_build_mask` (geopandas.sjoin) + убрать `.T` | Значительная | Опционально (закрывает DT-10-5) |
+
+**Критерий выбора для Cursor**: минимально инвазивный вариант, не меняющий контракт `result`-словаря (форма `(nx, ny, n)` в callers). Вариант A.

@@ -74,7 +74,7 @@ pie
 | DT-01 | ~~**[Blocker #3]**~~ **Закрыт (сессия 10, MVP).** GFS GRIB2 → NetCDF conversion: реализован Вариант A (`_convert_grib_to_netcdf` + `convert_existing` в `gfs_downloader.py`, sidecar `.nc`). 40/40 `.nc` создаются. `collect_meteo_data` находит и читает все 9 переменных. DoD подтверждён первым dry-run `forecast_morning.py --date 20260415`. | — | Закрыт |
 | DT-10-1 | Unit/integration тест `_convert_grib_to_netcdf` с реальным `.pgrb2` — проверка маппинга переменных на реальных данных | medium | Сессия 11 |
 | DT-10-2 | Изменить default `GFS_ENABLE_CONVERSION_TO_NETCDF` в `config.example.ini` с `false` на `true` | low | Сессия 11 |
-| DT-10-3 | **[Blocker #4 — Сессия 11]** Shape mismatch маски и данных в `collect_meteo_data`: маска строится через транспонированные meshgrid (`Lon_raw.T` / `Lat_raw.T`) → форма `(1440, 721)`, данные NetCDF — `(721, 1440, n_steps)`. `ValueError: operands could not be broadcast together with remapped shapes: (1440,721,1) and (721,1440,5)`. Нужно привести к единой ориентации осей. Контракт processing layer не менять. | **high** | Сессия 11 |
+| DT-10-3 | **[Blocker #4 — Сессия 11]** Shape mismatch маски и данных в `collect_meteo_data`: MATLAB-легаси `.T` в meshgrid даёт маску `(1440,721)`, данные NetCDF `(721,1440,n_steps)`. `ValueError: remapped shapes: (1440,721,1) and (721,1440,5)`. Варианты: **A** (рек.) — убрать `.T`, маска `(721,1440)`; **B** — транспонировать данные; **C** — векторизация + убрать `.T`. DoD: `broadcast_to` не бросает `ValueError`; dry-run `forecast_morning.py --date 20260415` проходит `collect_meteo_data` без исключений. | **high** | Сессия 11 |
 | DT-10-4 | `convert_existing()` glob `gfs.t*.pgrb2.0p25.f*` захватывает уже созданные `*.pgrb2.0p25.f006.nc` (double-extension), что вызывает `EOFError: No valid message found` при попытке их открыть как GRIB2. Решение: фильтровать glob строго, исключая `.nc`-окончания. | medium | Сессия 11 |
 | DT-10-5 | `_build_mask` использует Python-цикл по сетке 721×1440 (~1M итераций) через `shapely Point.within`; блокирует pipeline на несколько минут. Решение: векторизация через `geopandas.sjoin` или предварительный bbox-фильтр Каспийского моря. | medium | Сессия 11 |
 | DT-10-6 | Симметрия `forecast_evening.py`: добавить `GFSDownloader.convert_existing()` pre-conversion hook аналогично `forecast_morning.py`. Без этого вечерний dry-run упадёт на `FileNotFoundError`. | high | Сессия 11 |
@@ -95,14 +95,12 @@ pie
 
 ## Следующий этап (сессия 11)
 
-**Выполнено в сессии 10:**
-- Pre-work docs: `docs/project_context.md` — контракт ingestion/processing, DT-01 с вариантами A/B/C и DoD.
-- DT-01 реализован (MVP): `_convert_grib_to_netcdf`, `convert_existing`, sidecar `.nc`, конфиг-флаг `GFS_ENABLE_CONVERSION_TO_NETCDF`.
-- Первый end-to-end dry-run `forecast_morning.py --date 20260415`: 40/40 `.nc` созданы; `collect_meteo_data` находит и читает все 9 переменных.
-- Новое падение диагностировано: Blocker #4 — shape mismatch маски `(1440,721)` vs данных `(721,1440,n_steps)` в `collect_meteo_data`.
-- DT-10-3..6 зафиксированы.
+**Pre-work сессии 11 (выполнено Windsurf):**
+- `docs/project_context.md` обновлён: каноническая ориентация осей `(lat, lon, n_steps)` зафиксирована в разделе 5; DT-10-3 с вариантами A/B/C и DoD зафиксирован в разделе 9.
+- Архитектурный анализ: причина Blocker #4 — MATLAB-легаси `.T` в meshgrid (`collect_meteo_data.py` строки 182–183). Вариант A (очевиден).
 
-1. **Устранить Blocker #4 (DT-10-3)** — привести ориентацию осей маски и данных к единому виду в `collect_meteo_data` без изменения контракта processing layer.
-2. **DT-10-4** — исправить glob в `convert_existing` (исключить `.nc` из GRIB2-поиска).
-3. **DT-10-5** — векторизовать `_build_mask` (опционально, при наличии времени).
-4. **Повторить dry-run** после Blocker #4 — полный проход `collect_meteo_data` → статистика → `.docx`.
+1. **Cursor: устранить Blocker #4 (DT-10-3)** — предпочтительно Вариант A: убрать `.T` в `collect_meteo_data.py` строки 182–183.
+2. **Cursor: DT-10-4** — исправить glob в `convert_existing` (исключить `.nc` из GRIB2-поиска).
+3. **Cursor: DT-10-5** — векторизовать `_build_mask` (опционально).
+4. **Windsurf: arch review** diff `collect_meteo_data.py`, обновить docs.
+5. **Повторить dry-run** после Blocker #4 — полный проход `collect_meteo_data` → статистика → `.docx`.

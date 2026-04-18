@@ -145,7 +145,8 @@ hydromet_bulletin/
 - **Config**: `configparser.ConfigParser` (case-insensitive keys). Секции `CMEMS_*` и `GFS_*` разделены, общие `[DOWNLOAD]`/`[STORAGE]`/`[LOGGING]` — для CMEMS.
 - **CMEMS fallback policy**: при S3 нестабильности предпочтителен `cmems_download_mode=subset` (HTTP-only) для повышения production-стабильности.
 - **Shapefile storage policy**: шейп-файлы (`Kasp_Sea.*`) хранятся в `data/shapefiles/Kasp_Sea/`, не в корне проекта. Путь управляется через конфиг-ключ `shapefile_dir` в секции `[General]` (`%(basedir)s/data/shapefiles`). `collect_meteo_data()` и `collect_wave_data()` получают `shapefile_dir` как явный параметр.
-- **Контракт между ingestion layer и processing layer (формат данных GFS)**: ingestion layer (`gfs_downloader.py`) отвечает за скачивание GFS и **за приведение данных к формату `.nc`** перед тем, как они попадут в processing layer. Processing layer (`collect_meteo_data.py`) работает исключительно с `*.nc`-файлами и ничего не знает о формате GRIB2. Нарушение этого контракта (GRIB2 без конвертации) приводит к `FileNotFoundError` в `_discover_gfs_nc_files`. Реализация конвертации — DT-01, Blocker #3.
+- **Контракт между ingestion layer и processing layer (формат данных GFS)**: ingestion layer (`gfs_downloader.py`) отвечает за скачивание GFS и **за приведение данных к формату `.nc`** перед тем, как они попадут в processing layer. Processing layer (`collect_meteo_data.py`) работает исключительно с `*.nc`-файлами и ничего не знает о формате GRIB2. Нарушение этого контракта (GRIB2 без конвертации) приводит к `FileNotFoundError` в `_discover_gfs_nc_files`. Реализация конвертации — DT-01 (закрыт, сессия 10).
+- **Каноническая ориентация осей в processing layer** (сессия 11): `collect_meteo_data` читает NetCDF-переменные с размерностью `(lat=721, lon=1440)` и стекает их по оси 2. Каноническая форма данных внутри processing layer: **`(lat, lon, n_steps)` = `(721, 1440, n)`**, где ось 0 = lat, ось 1 = lon — NetCDF-стандарт. Маска акватории должна иметь форму **`(lat, lon)` = `(721, 1440)`** — совпадающую с первыми двумя осями данных. Транспонирование (`.T`) в логике построения meshgrid является MATLAB-легаси и нарушает эту ориентацию (Blocker #4, DT-10-3).
 - **GFS cycle selection — временная policy (DT-07-1, вариант B)**: при запуске `forecast_morning.py` / `forecast_evening.py` цикл GFS определяется как первый элемент из `GFS_CYCLES` в `[GFS_SOURCES]`:
   ```python
   gfs_cycle = cfg.get("GFS_SOURCES", "GFS_CYCLES", fallback="00z").split(",")[0].strip()
@@ -307,7 +308,16 @@ d63ae3a Baseline hydromet bulletin project (Python + Docker)
 ## 9. Deferred tasks / Future work
 
 - **DT-01 — GFS GRIB2 → NetCDF conversion / preprocessing** ✅ **Закрыт (сессия 10, MVP).** Реализован Вариант A: `_convert_grib_to_netcdf` + `convert_existing` в `gfs_downloader.py`, sidecar `.nc` рядом с GRIB2, 9 переменных с правильным маппингом, `lat`/`lon` дименсии. DoD подтверждён: `collect_meteo_data` находит 40/40 `.nc` и читает все 9 переменных в dry-run `forecast_morning.py --date 20260415`.
-- **DT-10-3 — Shape mismatch маски и данных** ⚠️ **Blocker #4 (сессия 11)**: маска в `_build_mask` строится через `Lon_raw.T` / `Lat_raw.T` → форма `(1440, 721)`; данные NetCDF — `(721, 1440, n_steps)`. `ValueError: operands could not be broadcast together with remapped shapes: (1440,721,1) and (721,1440,5)`. Архитектурный контракт ingestion/processing не меняется — баг находится внутри processing layer. Приоритет: **high**. Этап: сессия 11.
+- **DT-10-3 — Shape mismatch маски и данных** ⚠️ **Blocker #4 (сессия 11)**: MATLAB-легаси в `collect_meteo_data`: `np.meshgrid(lon_arr, lat_arr)` даёт `(721,1440)`, затем `.T` даёт `(1440,721)` → маска `(1440,721)`. Данные NetCDF (lat-first): `(721,1440,n_steps)`. `ValueError: remapped shapes: (1440,721,1) and (721,1440,5)`. Архитектурный контракт ingestion/processing не меняется — баг внутри processing layer.
+
+  **Варианты устранения (Cursor выбирает минимально инвазивный):**
+  - **A (рекомендован)**: убрать `.T` на строках `Lon = Lon_raw.T` / `Lat = Lat_raw.T` → маска станет `(721,1440)`. Минимальное изменение (две строки). ingestion-контракт не затрагивается.
+  - **B**: транспонировать данные после чтения (`np.transpose(stacked, (1,0,2))`) → `(1440,721,n)`. Большее вторжение в processing layer; не рекомендуется.
+  - **C**: векторизовать `_build_mask` через `geopandas.sjoin` + bbox-обрезка + убрать `.T` (закрывает DT-10-3 и DT-10-5 одновременно). Наибольшая инвазивность.
+
+  **Критерий выбора**: предпочить Наименьшее изменение для прохода dry-run; не менять контракт данных интерфейса (форма `(nx, ny, n)` в `result`-словаре) если возможно. **Вариант A**.
+
+  Definition of Done (DT-10-3): `broadcast_to(mask, agg.shape)` не бросает `ValueError`; dry-run `forecast_morning.py --date 20260415` проходит стадию `collect_meteo_data` без исключений. Приоритет: **high**. Этап: сессия 11.
 - **DT-10-4**: `convert_existing()` glob `gfs.t*.pgrb2.0p25.f*` захватывает уже созданные sidecar `*.nc`-файлы (double-extension) и пытается парсить их как GRIB2 → `EOFError: No valid message found`. Решение: фильтровать glob строго, исключая пати с `.nc`-окончанием. Приоритет: medium. Этап: сессия 11.
 - **DT-10-5**: `_build_mask` использует Python-цикл по сетке 721×1440 (~1M итераций) через `shapely Point.within` — блокирует pipeline на несколько минут. Решение: векторизация через `geopandas.sjoin` или предварительный bbox-фильтр. Приоритет: medium. Этап: сессия 11.
 - **Normalizing/preprocessing layer для GFS**: после v1, если прямой переход `gfs_downloader` → `collect_meteo_data` останется неудобным.
@@ -433,7 +443,7 @@ git push origin master
 **Текущие deferred items:**
 
 - **DT-01 — GFS GRIB2 → NetCDF conversion**: ✅ **Закрыт (сессия 10, MVP).** Вариант A: `_convert_grib_to_netcdf` + `convert_existing` в `gfs_downloader.py`. DoD подтверждён dry-runом.
-- **DT-10-3 — Shape mismatch маски/данных**: ⚠️ **Blocker #4 (сессия 11)**. Маска `(1440,721)` vs данные `(721,1440,n)` в `collect_meteo_data._build_mask`. Приоритет: high.
+- **DT-10-3 — Shape mismatch маски/данных**: ⚠️ **Blocker #4 (сессия 11)**. Маска `(1440,721)` vs данные `(721,1440,n)` в `collect_meteo_data`. Вариант A (рекомендован): убрать `.T` в meshgrid. Приоритет: high.
 - **DT-10-4**: `convert_existing` glob захватывает sidecar `.nc` → `EOFError`. Фильтр глоба по GRIB2-расширениям. Приоритет: medium.
 - **DT-10-5**: `_build_mask` Python-цикл 721×1440 через shapely — несколько минут. Векторизация через geopandas/bbox. Приоритет: medium.
 - **Normalizing/preprocessing layer для GFS**: после v1, если прямой переход `gfs_downloader` → `collect_meteo_data` останется неудобным.
