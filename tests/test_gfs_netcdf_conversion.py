@@ -112,6 +112,32 @@ class TestGFSNetcdfConversion(unittest.TestCase):
             self.assertEqual(len(called), 1)
             self.assertTrue(downloader._netcdf_output_path(grib_path).exists())
 
+    def test_convert_existing_skips_paths_with_nc_suffix_dt10_4(self) -> None:
+        """Sidecar NetCDF must not match GRIB glob (DT-10-4)."""
+        seen: list[str] = []
+
+        def _track(grib_path: Path) -> bool:
+            seen.append(grib_path.name)
+            return True
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            day_dir = root / "20260415" / "00z"
+            day_dir.mkdir(parents=True)
+            grib = day_dir / "gfs.t00z.pgrb2.0p25.f006"
+            grib.write_bytes(b"grib")
+            sidecar = day_dir / "gfs.t00z.pgrb2.0p25.f006.nc"
+            sidecar.write_bytes(b"netcdf")
+
+            cfg = _make_cfg(enable_conversion=True)
+            cfg.set("GFS_STORAGE", "GFS_OUTPUT_DIR", str(root))
+            dl = GFSDownloader(cfg, logger=self.logger)
+            dl._ensure_netcdf_for_grib = _track  # type: ignore[method-assign]
+
+            n = dl.convert_existing("20260415", "00z")
+            self.assertEqual(n, 1)
+            self.assertEqual(seen, ["gfs.t00z.pgrb2.0p25.f006"])
+
 
 if __name__ == "__main__":
     unittest.main()

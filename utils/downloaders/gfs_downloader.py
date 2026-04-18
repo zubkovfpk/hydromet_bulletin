@@ -204,7 +204,12 @@ class GFSDownloader:
             self.logger.warning("GFS storage dir not found: %s", out_dir)
             return 0
 
-        grib_files = sorted(out_dir.glob("gfs.t*.pgrb2.0p25.f*"))
+        # DT-10-4: glob "f*" захватывает sidecar *.pgrb2...f006.nc — не открывать как GRIB2
+        grib_files = sorted(
+            p
+            for p in out_dir.glob("gfs.t*.pgrb2.0p25.f*")
+            if p.suffix.lower() != ".nc"
+        )
         if not grib_files:
             self.logger.warning("No GRIB2 files found in: %s", out_dir)
             return 0

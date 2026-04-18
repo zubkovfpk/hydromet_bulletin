@@ -124,7 +124,8 @@ def collect_meteo_data(
     -------
     dict с ключами: Temp, Rain, Freeze_Rain, Ice_Pell, Snow,
                     Wind_Gust, U_wind, V_wind, Vis
-    Каждое значение — np.ndarray формы (nx, ny, n_days),
+    Каждое значение — np.ndarray формы (n_lat, n_lon, n_days)
+    (широта × долгота × сутки),
     где n_days=5 для большинства, n_days=10 для Temp.
     NaN за пределами акватории.
     """
@@ -174,16 +175,21 @@ def collect_meteo_data(
                 lat_arr = ds.variables["lat"][:].data.astype(float)
                 lon_arr = ds.variables["lon"][:].data.astype(float)
 
-    # Стекаем в трёхмерные массивы (nx, ny, n_steps)
+    # Стекаем в трёхмерные массивы (n_lat, n_lon, n_steps) — каноника для processing layer
     stacked: dict[str, np.ndarray] = {k: np.stack(v, axis=2) for k, v in accum.items()}
 
-    # Сетка координат (транспонируем как в MATLAB meshgrid + transpose)
-    Lon_raw, Lat_raw = np.meshgrid(lon_arr, lat_arr)
-    Lon = Lon_raw.T
-    Lat = Lat_raw.T
+    # Сетка координат: meshgrid(..., indexing="xy") даёт Lon/Lat формы (len(lat), len(lon)),
+    # совпадающей с первыми двумя осям stacked. Транспонирование .T здесь не применяем:
+    # в MATLAB-версии column-major индексация меняла порядок осей и ломала согласование с NumPy.
+    Lon, Lat = np.meshgrid(lon_arr, lat_arr)
 
     # Маска акватории
-    mask = _build_mask(Lon, Lat, str(shp_path))  # (nx, ny)
+    mask = _build_mask(Lon, Lat, str(shp_path))  # (n_lat, n_lon)
+    logger.info(
+        "Caspian mask: shape=%s, cells_inside=%d",
+        mask.shape,
+        int(np.sum(mask)),
+    )
 
     # Агрегация по суткам: шаги по 3ч → 8 шагов на сутки
     # Для большинства переменных: среднее за 8 шагов = 1 сутки (5 суток)
