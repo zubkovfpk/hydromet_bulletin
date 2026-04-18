@@ -308,18 +308,10 @@ d63ae3a Baseline hydromet bulletin project (Python + Docker)
 ## 9. Deferred tasks / Future work
 
 - **DT-01 — GFS GRIB2 → NetCDF conversion / preprocessing** ✅ **Закрыт (сессия 10, MVP).** Реализован Вариант A: `_convert_grib_to_netcdf` + `convert_existing` в `gfs_downloader.py`, sidecar `.nc` рядом с GRIB2, 9 переменных с правильным маппингом, `lat`/`lon` дименсии. DoD подтверждён: `collect_meteo_data` находит 40/40 `.nc` и читает все 9 переменных в dry-run `forecast_morning.py --date 20260415`.
-- **DT-10-3 — Shape mismatch маски и данных** ⚠️ **Blocker #4 (сессия 11)**: MATLAB-легаси в `collect_meteo_data`: `np.meshgrid(lon_arr, lat_arr)` даёт `(721,1440)`, затем `.T` даёт `(1440,721)` → маска `(1440,721)`. Данные NetCDF (lat-first): `(721,1440,n_steps)`. `ValueError: remapped shapes: (1440,721,1) and (721,1440,5)`. Архитектурный контракт ingestion/processing не меняется — баг внутри processing layer.
-
-  **Варианты устранения (Cursor выбирает минимально инвазивный):**
-  - **A (рекомендован)**: убрать `.T` на строках `Lon = Lon_raw.T` / `Lat = Lat_raw.T` → маска станет `(721,1440)`. Минимальное изменение (две строки). ingestion-контракт не затрагивается.
-  - **B**: транспонировать данные после чтения (`np.transpose(stacked, (1,0,2))`) → `(1440,721,n)`. Большее вторжение в processing layer; не рекомендуется.
-  - **C**: векторизовать `_build_mask` через `geopandas.sjoin` + bbox-обрезка + убрать `.T` (закрывает DT-10-3 и DT-10-5 одновременно). Наибольшая инвазивность.
-
-  **Критерий выбора**: предпочить Наименьшее изменение для прохода dry-run; не менять контракт данных интерфейса (форма `(nx, ny, n)` в `result`-словаре) если возможно. **Вариант A**.
-
-  Definition of Done (DT-10-3): `broadcast_to(mask, agg.shape)` не бросает `ValueError`; dry-run `forecast_morning.py --date 20260415` проходит стадию `collect_meteo_data` без исключений. Приоритет: **high**. Этап: сессия 11.
-- **DT-10-4**: `convert_existing()` glob `gfs.t*.pgrb2.0p25.f*` захватывает уже созданные sidecar `*.nc`-файлы (double-extension) и пытается парсить их как GRIB2 → `EOFError: No valid message found`. Решение: фильтровать glob строго, исключая пати с `.nc`-окончанием. Приоритет: medium. Этап: сессия 11.
-- **DT-10-5**: `_build_mask` использует Python-цикл по сетке 721×1440 (~1M итераций) через `shapely Point.within` — блокирует pipeline на несколько минут. Решение: векторизация через `geopandas.sjoin` или предварительный bbox-фильтр. Приоритет: medium. Этап: сессия 11.
+- **DT-10-3 — Shape mismatch маски и данных** ✅ **Закрыт (сессия 11, Вариант A, 72c6557).** Удалён `.T` в meshgrid `collect_meteo_data.py`: `Lon, Lat = np.meshgrid(lon_arr, lat_arr)` (no `.T`). Маска `(721,1440)` = данные `(721,1440,n)`. `mask shape=(721,1440)`, `cells_inside=236`. DoD выполнен. Downstream-чек: ни один downstream-модуль не предполагает `(n_lon,n_lat)`. Новые тесты: `test_collect_meteo_mask_orientation.py` (2 теста passed).
+- **DT-10-4** ✅ **Закрыт (сессия 11, 72c6557).** `convert_existing()` glob фильтрует `p.suffix.lower() != ".nc"` — sidecar-файлы не открываются как GRIB2. Тест: `test_convert_existing_skips_paths_with_nc_suffix_dt10_4` passed.
+- **DT-10-5**: `_build_mask` Python-цикл ~25–30 с — не блокирует dry-run. **Deferred (сессия 12+)**: оптимизация через `geopandas.sjoin`/bbox Каспия остаётся follow-up при росте времени. Приоритет: low.
+- **DT-11-1** ⚠️ **Blocker #5 (сессия 12)**: `FileNotFoundError: No CMEMS .nc files found for run_date=20260415` в `collect_wave_data`. CMEMS-данные для тестовой даты не загружены. Необходимо: запустить `fetch_inputs.py` или создать mock-NC для `collect_wave_data`. Приоритет: high. Этап: сессия 12.
 - **Normalizing/preprocessing layer для GFS**: после v1, если прямой переход `gfs_downloader` → `collect_meteo_data` останется неудобным.
 - **Downstream validation перед `doc_builder.py`**: day-level проверка сформированных диапазонов (`wind_min ≤ wind_max` и т.д.); не блокирует v1.
 - **Soft quality rules**: физические диапазоны, NaN ratio thresholds, sanity checks для precipitation — warning-only layer после MVP.
@@ -443,9 +435,10 @@ git push origin master
 **Текущие deferred items:**
 
 - **DT-01 — GFS GRIB2 → NetCDF conversion**: ✅ **Закрыт (сессия 10, MVP).** Вариант A: `_convert_grib_to_netcdf` + `convert_existing` в `gfs_downloader.py`. DoD подтверждён dry-runом.
-- **DT-10-3 — Shape mismatch маски/данных**: ⚠️ **Blocker #4 (сессия 11)**. Маска `(1440,721)` vs данные `(721,1440,n)` в `collect_meteo_data`. Вариант A (рекомендован): убрать `.T` в meshgrid. Приоритет: high.
-- **DT-10-4**: `convert_existing` glob захватывает sidecar `.nc` → `EOFError`. Фильтр глоба по GRIB2-расширениям. Приоритет: medium.
-- **DT-10-5**: `_build_mask` Python-цикл 721×1440 через shapely — несколько минут. Векторизация через geopandas/bbox. Приоритет: medium.
+- **DT-10-3** ✅ **Закрыт (сессия 11, Вариант A)**: удалён `.T` в meshgrid, маска `(721,1440)`, `cells_inside=236`. DoD выполнен.
+- **DT-10-4** ✅ **Закрыт (сессия 11)**: strict GRIB glob в `convert_existing` (`p.suffix != ".nc"`).
+- **DT-10-5**: ~25–30 с не блокирует. Deferred (сессия 12+), приоритет low.
+- **DT-11-1** ⚠️ **Blocker #5 (сессия 12)**: CMEMS `.nc` not found в `collect_wave_data` — данные не загружены. Приоритет: high.
 - **Normalizing/preprocessing layer для GFS**: после v1, если прямой переход `gfs_downloader` → `collect_meteo_data` останется неудобным.
 - **Downstream validation перед `doc_builder.py`**: проверка day-level диапазонов (`wind_min ≤ wind_max` и т.д.); не блокирует v1.
 - **Soft quality rules**: физические диапазоны, NaN ratio thresholds, sanity checks для precipitation — warning-only layer после MVP `validate_outputs.py`.

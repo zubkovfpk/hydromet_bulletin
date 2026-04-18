@@ -57,6 +57,7 @@ gantt
 | 8 | 16.04.2026 | ~4 ч | DT-07-3 закрыт, Blocker #1 (logging) + Blocker #2 (shapefile) устранены, arch review ×2 Approve, DT-08-1..7 зафиксированы |
 | 9 | 16.04.2026 | ~2 ч | BOM-fix config.ini, import-fix collect_meteo_data, dry-run частично успешен, выявлен Blocker #3 (DT-01: GRIB2→NetCDF) |
 | 10 | 17–18.04.2026 | ~5 ч | DT-01 реализован (Вариант A + follow-up convert_existing); первый end-to-end dry-run пройден до processing stage; 40/40 .nc созданы; новое падение: shape mismatch маски → Blocker #4 (DT-10-3) |
+| 11 | 18.04.2026 | ~2 ч | Pre-work Windsurf: canonical axis contract, варианты A/B/C. Cursor: DT-10-3 закрыт (Вариант A, убран `.T`) + DT-10-4 закрыт (strict GRIB glob). Dry-run прошёл mask stage (236 ячеек), новое падение: FileNotFoundError в collect_wave_data (DT-11-1) |
 
 ## Общий прогресс: ~70%
 
@@ -74,10 +75,11 @@ pie
 | DT-01 | ~~**[Blocker #3]**~~ **Закрыт (сессия 10, MVP).** GFS GRIB2 → NetCDF conversion: реализован Вариант A (`_convert_grib_to_netcdf` + `convert_existing` в `gfs_downloader.py`, sidecar `.nc`). 40/40 `.nc` создаются. `collect_meteo_data` находит и читает все 9 переменных. DoD подтверждён первым dry-run `forecast_morning.py --date 20260415`. | — | Закрыт |
 | DT-10-1 | Unit/integration тест `_convert_grib_to_netcdf` с реальным `.pgrb2` — проверка маппинга переменных на реальных данных | medium | Сессия 11 |
 | DT-10-2 | Изменить default `GFS_ENABLE_CONVERSION_TO_NETCDF` в `config.example.ini` с `false` на `true` | low | Сессия 11 |
-| DT-10-3 | **[Blocker #4 — Сессия 11]** Shape mismatch маски и данных в `collect_meteo_data`: MATLAB-легаси `.T` в meshgrid даёт маску `(1440,721)`, данные NetCDF `(721,1440,n_steps)`. `ValueError: remapped shapes: (1440,721,1) and (721,1440,5)`. Варианты: **A** (рек.) — убрать `.T`, маска `(721,1440)`; **B** — транспонировать данные; **C** — векторизация + убрать `.T`. DoD: `broadcast_to` не бросает `ValueError`; dry-run `forecast_morning.py --date 20260415` проходит `collect_meteo_data` без исключений. | **high** | Сессия 11 |
-| DT-10-4 | `convert_existing()` glob `gfs.t*.pgrb2.0p25.f*` захватывает уже созданные `*.pgrb2.0p25.f006.nc` (double-extension), что вызывает `EOFError: No valid message found` при попытке их открыть как GRIB2. Решение: фильтровать glob строго, исключая `.nc`-окончания. | medium | Сессия 11 |
-| DT-10-5 | `_build_mask` использует Python-цикл по сетке 721×1440 (~1M итераций) через `shapely Point.within`; блокирует pipeline на несколько минут. Решение: векторизация через `geopandas.sjoin` или предварительный bbox-фильтр Каспийского моря. | medium | Сессия 11 |
-| DT-10-6 | Симметрия `forecast_evening.py`: добавить `GFSDownloader.convert_existing()` pre-conversion hook аналогично `forecast_morning.py`. Без этого вечерний dry-run упадёт на `FileNotFoundError`. | high | Сессия 11 |
+| DT-10-3 | ~~**[Blocker #4]**~~ **Закрыт (сессия 11, Вариант A).** Удалён `.T` в meshgrid `collect_meteo_data.py`. Маска `(721,1440)` совпадает с данными `(721,1440,n)`. Dry-run: `mask shape=(721,1440)`, `cells_inside=236`, `ValueError` снят. Downstream-чек: ни один downstream-модуль не предполагает `(n_lon, n_lat)` — все используют `[:,:,n]`. DoD выполнен. | — | Закрыт |
+| DT-10-4 | ~~**[medium]**~~ **Закрыт (сессия 11).** `convert_existing()` glob теперь фильтрует `p.suffix.lower() != ".nc"` — sidecar-файлы исключены из GRIB2-парсинга. | — | Закрыт |
+| DT-10-5 | `_build_mask` Python-цикл 721×1440 (~1M ит.) через `shapely Point.within` — ~25–30 с. **Deferred** (сессия 11): фактическое время построения маски ~25–30 с не блокирует dry-run; оптимизация через `geopandas.sjoin` / bbox Каспия остаётся follow-up при росте времени выполнения. | low | Сессия 12+ |
+| DT-10-6 | Симметрия `forecast_evening.py`: добавить `GFSDownloader.convert_existing()` pre-conversion hook аналогично `forecast_morning.py`. Без этого вечерний dry-run упадёт на `FileNotFoundError`. Дополнительно: `forecast_evening.py` использует устаревший import-стиль `from utils import collect_meteo_data`. | high | Сессия 12 |
+| DT-11-1 | **[Blocker #5 — Сессия 12]** `FileNotFoundError: No CMEMS .nc files found for run_date=20260415` в `collect_wave_data`. CMEMS-файлы для тестовой даты не загружены. Необходимо: запустить `fetch_inputs.py` для получения CMEMS-данных перед повторным dry-run или создать mock-NC. | **high** | Сессия 12 |
 | DT-02 | Normalizing/preprocessing layer для GFS | medium | После Processing layer adaptation |
 | DT-03 | Downstream validation перед `doc_builder.py` | low | После validate_outputs v1 |
 | DT-04 | Soft quality rules (физ. диапазоны, NaN ratio, sanity checks) | low | После MVP validate_outputs |
@@ -89,18 +91,33 @@ pie
 | DT-08-2 | При cron-пересечении morning + evening оба процесса пишут в один `hydromet.log` через раздельные `FileHandler` — строки могут чередоваться. Решение: раздельные `hydromet_morning.log` / `hydromet_evening.log` или `SocketHandler`. | medium | Сессия 9 |
 | DT-08-3 | `FileHandler` пишет без ограничения размера; лог растёт неограниченно при ежедневном cron. Решение: `RotatingFileHandler(maxBytes=5MB, backupCount=7)`. | medium | Сессия 9 |
 | DT-08-4 | Если процесс в Docker не под root, `mkdir` для `/app/logs/` может дать `PermissionError`. Решение: `RUN mkdir -p /app/logs && chown ...` в `Dockerfile`; проверить при следующем Docker-тесте. | medium | Сессия 9 |
-| DT-08-5 | `test_retry_on_bad_url` — known flaky test: падает если `gfs.t00z.pgrb2.0p25.f006` уже существует локально (загрузчик делает skip, retry path не активируется). Решение: фикстура очистки кэша перед тестом или mock локального хранилища. | low | Сессия 9 |
+| DT-08-5 | `test_retry_on_bad_url` — known flaky test (падает если GRIB2 уже существует локально). Сессия 11: 1 xfailed — **не является регрессией сессии 11** (поведение идентично до фикса). | low | Сессия 9 |
 | DT-08-6 | Нет unit-теста для `shapefile_dir=None` — проверки, что fallback строит `basedir/data/shapefiles`. Решение: добавить 1 unit-тест в `tests/test_processing_layout_paths.py`. | low | Сессия 9 |
 | DT-08-7 | `shapefile_dir` стал вторым позиционным параметром в `collect_meteo_data()` / `collect_wave_data()`, что рискованно для callers с positional args. Решение: добавить `*` в сигнатуры для принудительного keyword-only. | low | Сессия 9 |
 
-## Следующий этап (сессия 11)
+## Сессия 11 — итоги и следующий этап (сессия 12)
 
-**Pre-work сессии 11 (выполнено Windsurf):**
-- `docs/project_context.md` обновлён: каноническая ориентация осей `(lat, lon, n_steps)` зафиксирована в разделе 5; DT-10-3 с вариантами A/B/C и DoD зафиксирован в разделе 9.
-- Архитектурный анализ: причина Blocker #4 — MATLAB-легаси `.T` в meshgrid (`collect_meteo_data.py` строки 182–183). Вариант A (очевиден).
+**Выполнено в сессии 11:**
+- Pre-work Windsurf (8413a67): canonical axis contract, варианты A/B/C в docs.
+- DT-10-3 ✅ закрыт (Cursor, 72c6557, Вариант A): убран `.T`, маска `(721,1440)`, 236 ячеек внутри акватории.
+- DT-10-4 ✅ закрыт (Cursor, 72c6557): strict GRIB glob в `convert_existing`.
+- DT-10-5 deferred: ~25–30 с не блокирует dry-run.
+- Тесты: 23 passed + 1 xfailed, 42 passed + 1 failed (DT-08-5, не регресс).
+- DoD сессии 11 ✅: `broadcast_to` не бросает `ValueError`; dry-run прошёл `collect_meteo_data`; контракт ingestion/processing не нарушен.
+- Новый blocker: DT-11-1 (CMEMS `.nc` not found).
 
-1. **Cursor: устранить Blocker #4 (DT-10-3)** — предпочтительно Вариант A: убрать `.T` в `collect_meteo_data.py` строки 182–183.
-2. **Cursor: DT-10-4** — исправить glob в `convert_existing` (исключить `.nc` из GRIB2-поиска).
-3. **Cursor: DT-10-5** — векторизовать `_build_mask` (опционально).
-4. **Windsurf: arch review** diff `collect_meteo_data.py`, обновить docs.
-5. **Повторить dry-run** после Blocker #4 — полный проход `collect_meteo_data` → статистика → `.docx`.
+**Downstream-чеклист (Windsurf, сессия 11):**
+
+| Модуль / место | Паттерн доступа | Предположение `(n_lon,n_lat)`? |
+|---|---|---|
+| `forecast_morning.py` стр. 121–138 | `meteo[key][:, :, n]` | ✅ Нет |
+| `forecast_evening.py` стр. 116–133 | `meteo[key][:, :, n]` | ✅ Нет |
+| `wind_statistics.py` | `.flatten()`, element-wise | ✅ Нет |
+| `precip_statistics.py` | boolean indexing | ✅ Нет |
+| `temp_statistics.py` | `~np.isnan`, `np.quantile` | ✅ Нет |
+| `validate_outputs.py` | `arr.shape[:2]` relative, no hardcoded dims | ✅ Нет |
+
+**Следующий этап (сессия 12):**
+1. Запустить `fetch_inputs.py` для загрузки CMEMS-данных (DT-11-1, Blocker #5).
+2. DT-10-6: добавить `convert_existing` hook в `forecast_evening.py` + исправить import-стиль.
+3. Повторить dry-run после CMEMS — проход `collect_wave_data` → статистика → `.docx`.

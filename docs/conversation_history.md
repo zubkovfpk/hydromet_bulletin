@@ -1794,3 +1794,100 @@ ValueError: operands could not be broadcast together with remapped shapes:
 | C | Векторизация `_build_mask` (geopandas.sjoin) + убрать `.T` | Значительная | Опционально (закрывает DT-10-5) |
 
 **Критерий выбора для Cursor**: минимально инвазивный вариант, не меняющий контракт `result`-словаря (форма `(nx, ny, n)` в callers). Вариант A.
+
+---
+
+### 2. Реализация Cursor (72c6557)
+
+Commit: `fix(processing): align Caspian mask grid with GFS arrays (DT-10-3); strict GRIB glob in convert_existing (DT-10-4)`
+
+#### 2.1 utils/collect_meteo_data.py
+
+Изменения:
+
+| До | После |
+|----|-------|
+| `Lon_raw, Lat_raw = np.meshgrid(lon_arr, lat_arr)` | `Lon, Lat = np.meshgrid(lon_arr, lat_arr)` |
+| `Lon = Lon_raw.T` | *(удалено)* |
+| `Lat = Lat_raw.T` | *(удалено)* |
+| docstring: `(nx, ny, n_days)` | `(n_lat, n_lon, n_days)` |
+| комментарий: `(nx, ny, n_steps)` | `(n_lat, n_lon, n_steps) — каноника` |
+| комментарий: `# (nx, ny)` | `# (n_lat, n_lon)` |
+
+Добавлен `logger.info("Caspian mask: shape=%s, cells_inside=%d", mask.shape, int(np.sum(mask)))`.
+
+**Arch review Windsurf**: ✅ Вариант A подтверждён. Только `.T` удалено; `stacked`, `daily_mean`, broadcast — не тронуты. Ingestion/processing контракт не изменён.
+
+#### 2.2 utils/downloaders/gfs_downloader.py
+
+```python
+grib_files = sorted(
+    p
+    for p in out_dir.glob("gfs.t*.pgrb2.0p25.f*")
+    if p.suffix.lower() != ".nc"
+)
+```
+
+**Arch review Windsurf**: ✅ DT-10-4. Sidecar `.nc`-файлы больше не включаются в GRIB2-парсинг. Изменения локализованы в `convert_existing`.
+
+#### 2.3 Новые тесты
+
+- `tests/test_collect_meteo_mask_orientation.py` (новый, 2 теста): проверяет форму `meshgrid` без `.T` и broadcast `mask(721,1440)` → `agg(721,1440,5)`.
+- `tests/test_gfs_netcdf_conversion.py` (добавлен 1 тест): `test_convert_existing_skips_paths_with_nc_suffix_dt10_4` — mock `_ensure_netcdf_for_grib`, проверяет что sidecar `.nc` не попадает в вызов.
+
+---
+
+### 3. Downstream-проверка каноники осей (Windsurf)
+
+Прочитаны: `forecast_morning.py`, `forecast_evening.py`, `wind_statistics.py`, `precip_statistics.py`, `temp_statistics.py`, `validate_outputs.py`.
+
+| Модуль | Паттерн доступа к `result[key]` | Предположение `(n_lon=1440, n_lat=721)`? |
+|--------|--------------------------------|------------------------------------------|
+| `forecast_morning.py` стр. 121–138 | `meteo[key][:, :, n]` | ✅ Нет |
+| `forecast_evening.py` стр. 116–133 | `meteo[key][:, :, n]` | ✅ Нет |
+| `wind_statistics.py` | получает 2D срез, `.flatten()` | ✅ Нет |
+| `precip_statistics.py` | получает 2D срез, boolean mask | ✅ Нет |
+| `temp_statistics.py` | получает 2D срез, `np.isnan`, `quantile` | ✅ Нет |
+| `validate_outputs.py` | `arr.shape[:2]` relative, `arr[:,:,idx]` | ✅ Нет |
+
+**Вывод**: ни один downstream-модуль не хранит предположений о `(n_lon, n_lat)` ориентации. Исправление `.T` не требует изменений в callers.
+
+**Побочное наблюдение**: `forecast_evening.py` строки 18–19 используют `from utils import collect_meteo_data` (старый стиль) и не содержат `convert_existing` pre-conversion hook — документировано как DT-10-6.
+
+---
+
+### 4. Результат dry-run и итоги сессии 11
+
+#### 4.1 Dry-run: `py forecast_morning.py --date 20260415`
+
+| Стадия | Статус |
+|--------|--------|
+| GFS GRIB2→NetCDF pre-conversion | ✅ 40 файлов |
+| `collect_meteo_data`: discover `.nc` | ✅ 40/40 |
+| `_build_mask`: `shape=(721,1440)`, `cells_inside=236` | ✅ |
+| broadcast маски → `ValueError` | ✅ Снят |
+| `collect_wave_data` | ❌ `FileNotFoundError: No CMEMS .nc files found for run_date=20260415` |
+
+#### 4.2 Тесты
+
+- 23 passed + 1 xfailed (целевые) — DT-08-5 known flaky, не регресс.
+- 42 passed + 1 failed (DT-08-5) — идентично состоянию до фикса.
+
+#### 4.3 Решения и договорённости
+
+| Решение | Обоснование |
+|---------|------------|
+| DT-10-3 закрыт (Вариант A) | `.T` удалён — минимальное изменение, DoD выполнен |
+| DT-10-4 закрыт | Strict glob исключает sidecar `.nc` из GRIB2-парсинга |
+| DT-10-5 deferred | ~25–30 с не блокирует pipeline; оптимизация позже |
+| DT-11-1 / Blocker #5 | CMEMS-данные для dry-run даты отсутствуют — следующий блокер |
+| DT-08-5: не регресс | 1 xfailed — идентичное поведение до и после фикса |
+| Downstream-контракт не нарушен | Все callers используют `[:,:,n]` — shape-agnostic |
+
+#### 4.4 Итоговые коммиты сессии 11
+
+| Коммит | Файлы | Содержание |
+|--------|-------|-----------|
+| 8413a67 | `docs/*` | Pre-work: canonical axis contract, варианты A/B/C, DoD |
+| 72c6557 | `utils/collect_meteo_data.py`, `utils/downloaders/gfs_downloader.py`, `tests/*` | DT-10-3 (Вариант A) + DT-10-4 (strict glob) |
+| (текущий) | `docs/*` | Финализация: DT-10-3/4 закрыты, DT-11-1 зарегистрирован, downstream-чек |
