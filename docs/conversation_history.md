@@ -1897,3 +1897,51 @@ grib_files = sorted(
 | 8413a67 | `docs/*` | Pre-work: canonical axis contract, варианты A/B/C, DoD |
 | 72c6557 | `utils/collect_meteo_data.py`, `utils/downloaders/gfs_downloader.py`, `tests/*` | DT-10-3 (Вариант A) + DT-10-4 (strict glob) |
 | 9392c6b | `docs/*` | Финализация: DT-10-3/4 закрыты, DT-11-1 зарегистрирован, downstream-чек |
+| 8e0acfd | `docs/*` | Session 11 final sync: DT-11-1 full format, pytest 4 skipped, checklist, what-not-done |
+
+---
+
+## Сессия 12 — DT-11-1 / DT-12-1
+
+### 1. Pre-work Windsurf
+
+**Цель сессии 12:** устранить DT-11-1 (CMEMS lookup) и DT-12-1 (wave axis orientation `(lon,lat,5)` → `(lat,lon,5)`), подготовить E2E dry-run до `.docx`.
+
+**Git policy:** код-коммиты Cursor не пушатся в ходе сессии. Push docs-коммита разрешён только после явной команды.
+
+#### 1.1 Контекст из git log
+
+- `acbcfba` (LOCAL, Cursor) — `fix(waves): discover nested CMEMS layout and clarify missing-data errors (DT-11-1)`
+- `8e0acfd` (remote HEAD) — последний docs push
+
+Cursor уже реализовал **3-tier discovery** в `_discover_cmems_nc_files()` (commit `acbcfba`):
+1. flat dated dir: `{cmems_root}/{run_date}/*.nc`
+2. nested glob: `{cmems_root}/**/mfwamglocep_{run_date}*.nc`
+3. legacy dir: `{base_dir}/{waves_dir}/*.nc`
+
+#### 1.2 Обнаружена новая проблема — DT-12-1
+
+При чтении `collect_wave_data.py` выявлено MATLAB-легаси — аналог DT-10-3:
+
+| Строка | Текущий код | Проблема |
+|--------|-------------|----------|
+| 185 | `H_Wave = np.zeros((nx_full, ny_full, 40))` | `nx_full=len(lon_full)` → ось 0 = lon |
+| 192 | `np.transpose(h_wave.data, (2, 1, 0))` | NetCDF `(time,lat,lon)` → `(lon,lat,time)` |
+| 212 | `H_Wave[np.ix_(lon_mask, lat_mask, ...)]` | lon-первый индекс |
+| 216–218 | `Lon = Lon_raw.T` / `Lat = Lat_raw.T` | маска `(lon_crop, lat_crop)` |
+
+Возвращаемый `Wave` имеет форму `(lon_crop, lat_crop, 5)` — **нарушает каноническую ориентацию `(lat, lon, 5)`**.
+
+**Вариант A fix DT-12-1 (рекомендован Cursor):**
+- `np.transpose(h_wave.data, (1, 2, 0))` → `(lat, lon, time)`
+- `H_Wave = np.zeros((ny_full, nx_full, 40))`
+- `H_Wave[np.ix_(lat_mask, lon_mask, ...)]`
+- убрать `.T` на строках 217–218
+- docstring: `(n_lat, n_lon, 5)`
+
+#### 1.3 Обновлено в docs
+
+- `project_context.md` раздел 5: CMEMS ingestion contract, 3-tier lookup contract, wave axis canon → `(lat,lon,n_days)`, DT-12-1 описан.
+- `project_context.md` раздел 9: DT-11-1 обновлён (acbcfba), DT-12-1 добавлен.
+- `project_context.md` раздел 11.3: current deferred items обновлены.
+- `project_progress.md`: сессия 12 добавлена в хронологию; DT-11-1 расширен (варианты A/B/C, шаги I-III, git policy); DT-12-1 добавлен; секция плана сессии 12 создана.

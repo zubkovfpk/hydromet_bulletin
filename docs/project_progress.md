@@ -58,6 +58,7 @@ gantt
 | 9 | 16.04.2026 | ~2 ч | BOM-fix config.ini, import-fix collect_meteo_data, dry-run частично успешен, выявлен Blocker #3 (DT-01: GRIB2→NetCDF) |
 | 10 | 17–18.04.2026 | ~5 ч | DT-01 реализован (Вариант A + follow-up convert_existing); первый end-to-end dry-run пройден до processing stage; 40/40 .nc созданы; новое падение: shape mismatch маски → Blocker #4 (DT-10-3) |
 | 11 | 18.04.2026 | ~2 ч | Pre-work Windsurf: canonical axis contract, варианты A/B/C. Cursor: DT-10-3 закрыт (Вариант A, убран `.T`) + DT-10-4 закрыт (strict GRIB glob). Dry-run прошёл mask stage (236 ячеек), новое падение: FileNotFoundError в collect_wave_data (DT-11-1) |
+| 12 | 19.04.2026 | в процессе | Pre-work Windsurf: CMEMS lookup contract, wave axis canon, DT-12-1. Cursor (acbcfba): DT-11-1 частично — 3-tier discovery. DT-12-1 открыт: wave массив в (lon,lat,5) vs канонических (lat,lon,5) |
 
 ## Общий прогресс: ~70%
 
@@ -79,7 +80,8 @@ pie
 | DT-10-4 | ~~**[medium]**~~ **Закрыт (сессия 11, 72c6557).** `convert_existing()` glob теперь фильтрует `p.suffix.lower() != ".nc"` — sidecar `.nc`-файлы не открываются как GRIB2. Тест `test_convert_existing_skips_paths_with_nc_suffix_dt10_4` passed. | — | Закрыт |
 | DT-10-5 | `_build_mask` Python-цикл 721×1440 (~1M ит.) через `shapely Point.within` — ~25–30 с. **Deferred** (сессия 11): фактическое время построения маски ~25–30 с не блокирует dry-run; оптимизация через `geopandas.sjoin` / bbox Каспия остаётся follow-up при росте времени выполнения. | low | Сессия 12+ |
 | DT-10-6 | Симметрия `forecast_evening.py`: добавить `GFSDownloader.convert_existing()` pre-conversion hook аналогично `forecast_morning.py`. Без этого вечерний dry-run упадёт на `FileNotFoundError`. Дополнительно: `forecast_evening.py` использует устаревший import-стиль `from utils import collect_meteo_data`. | high | Сессия 12 |
-| DT-11-1 | **[Blocker #5 — Сессия 12]** **Title:** CMEMS .nc not found for run\_date in collect\_wave\_data. **Discovered:** session 11, dry-run `py forecast_morning.py --date 20260415`. **Symptom:** `FileNotFoundError: No CMEMS .nc files found for run_date=20260415`. **Stage:** `collect_wave_data` (следующая стадия после `collect_meteo_data`). **Likely cause:** локально отсутствуют CMEMS `.nc` за указанную дату (test date 20260415), либо неверный каталог/шаблон поиска в storage; требуется разделить case «данные не загружены» vs «баг lookup-пути». **DoD:** воспроизведение локально с актуальной датой + подтверждение что это missing data; при баге lookup — отдельная задача в сессии 12. **Blocks:** полный E2E dry-run до `.docx`. **Related:** DT-10-3 (closed), DT-10-4 (closed). | **high** | Сессия 12 |
+| DT-11-1 | **[Blocker #5]** **Title:** CMEMS .nc not found for run\_date in collect\_wave\_data. **Discovered:** session 11. **Symptom:** `FileNotFoundError: No CMEMS .nc files found for run_date=20260415`. **Cursor fix (acbcfba):** 3-tier discovery (flat dated → nested mfwamglocep pattern → legacy). **Варианты lookup-фикса:** A (реализован) — 3-tier discovery; B — изменить шаблон поиска; C — переименовать каталог хранилища. **Шаги I–III:** I: инвентаризация `data/storage/cmems/` — найти где реально лежат CMEMS NC; II: dry-run с валидной датой (сегодня или дата с загруженными данными); III: при lookup-mismatch — создать/исправить путь. **DoD:** dry-run `forecast_morning.py` проходит `collect_wave_data` без `FileNotFoundError`; `collect_wave_data` возвращает Wave-массив. **Blocks:** E2E dry-run до `.docx`. **Related:** DT-10-3 (closed), DT-12-1 (new). **Git policy:** код-коммиты Cursor НЕ пушатся в сессии 12. | **high** | Сессия 12 |
+| DT-12-1 | **[Blocker #6 — Сессия 12]** `collect_wave_data.py` возвращает `Wave` в `(lon, lat, 5)` — нарушает каноническую ориентацию `(lat, lon, 5)` (аналог DT-10-3). **Место:** строки 185 (`H_Wave=(nx,ny,40)`), 192 (`transpose(2,1,0)` → `(lon,lat,time)`), 212 (`np.ix_(lon_mask,lat_mask,...)`), 216–218 (`.T` в meshgrid). **Вариант A (рекомендован):** транспозиция `(1,2,0)` → `(lat,lon,time)`, `H_Wave=(ny_full,nx_full,40)`, `np.ix_(lat_mask,lon_mask,...)`, убрать `.T`, docstring `(n_lat,n_lon,5)`. **DoD:** `broadcast_to` маски не бросает `ValueError`; форма `Wave.shape = (lat_crop, lon_crop, 5)`. **Related:** DT-11-1. | **high** | Сессия 12 |
 | DT-02 | Normalizing/preprocessing layer для GFS | medium | После Processing layer adaptation |
 | DT-03 | Downstream validation перед `doc_builder.py` | low | После validate_outputs v1 |
 | DT-04 | Soft quality rules (физ. диапазоны, NaN ratio, sanity checks) | low | После MVP validate_outputs |
@@ -124,7 +126,27 @@ pie
 
 *DT-11-2 не создавался: подозрительных мест с `(lon, lat, ...)` не обнаружено.*
 
-**Следующий этап (сессия 12):**
-1. Запустить `fetch_inputs.py` для загрузки CMEMS-данных (DT-11-1, Blocker #5).
-2. DT-10-6: добавить `convert_existing` hook в `forecast_evening.py` + исправить import-стиль.
-3. Повторить dry-run после CMEMS — проход `collect_wave_data` → статистика → `.docx`.
+## Сессия 12 — план
+
+**Git policy сессии 12:**
+- Cursor накапливает локальные коммиты поверх `72c6557` — **НЕ пушит**.
+- Push по ветке `feature/bulletin-generation` разрешён ТОЛЬКО для docs-коммита в конце сессии и только после явной команды.
+
+**Pre-work Windsurf (сделано, текущий коммит):**
+- `project_context.md`: CMEMS ingestion contract, 3-tier lookup contract, wave axis canon, DT-12-1.
+- `project_progress.md`: DT-11-1 расширен (шаги I-III, варианты A/B/C), DT-12-1 добавлен.
+
+**Задачи Cursor (локально):**
+
+| Приоритет | Задача |
+|-----------|--------|
+| 1 | DT-11-1: проверить `data/storage/cmems/` — найти реальные CMEMS NC; dry-run с валидной датой |
+| 2 | DT-12-1: исправить ориентацию осей в `collect_wave_data.py` (Вариант A: transpose `(1,2,0)`, убрать `.T`) |
+| 3 | DT-10-6: добавить `convert_existing` hook в `forecast_evening.py`, исправить import-стиль |
+| 4 | Повторный E2E dry-run: `collect_wave_data` → статистика → `.docx` |
+
+**После отчёта Cursor (post-work Windsurf):**
+1. Прочитать diff всех локальных коммитов Cursor поверх `72c6557`.
+2. Arch review: правки локализованы, контракт не сломан, каноника `(lat,lon,time)` сохранена.
+3. Downstream-чек wave callers: `forecast_morning.py`, `forecast_evening.py`, `doc_builder.py`.
+4. Обновить docs + коммит + push (только после явной команды).
