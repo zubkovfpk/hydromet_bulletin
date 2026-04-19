@@ -1870,8 +1870,8 @@ grib_files = sorted(
 
 #### 4.2 Тесты
 
-- 23 passed + 1 xfailed (целевые) — DT-08-5 known flaky, не регресс.
-- 42 passed + 1 failed (DT-08-5) — идентично состоянию до фикса.
+- Целевые: **23 passed, 1 xfailed**.
+- Полный pytest: **42 passed, 1 failed** (`test_retry_on_bad_url` — DT-08-5 known flaky, не регресс сессии 11), **4 skipped**. Поведение идентично до 72c6557.
 
 #### 4.3 Решения и договорённости
 
@@ -1884,10 +1884,16 @@ grib_files = sorted(
 | DT-08-5: не регресс | 1 xfailed — идентичное поведение до и после фикса |
 | Downstream-контракт не нарушен | Все callers используют `[:,:,n]` — shape-agnostic |
 
-#### 4.4 Итоговые коммиты сессии 11
+#### 4.4 Что НЕ делалось в сессии 11
+
+- **DT-10-5** не векторизован: `_build_mask` Python-цикл остался как есть; не блокирует, deferred в сессию 12+.
+- Коммит кода **72c6557** на момент запуска сессии был local-only; включён в remote как часть цепочки push `9392c6b`.
+- DT-11-1 не решался: CMEMS-данные для 20260415 не загружены, collect\_wave\_data ещё блокирует E2E dry-run.
+
+#### 4.5 Итоговые коммиты сессии 11
 
 | Коммит | Файлы | Содержание |
 |--------|-------|-----------|
 | 8413a67 | `docs/*` | Pre-work: canonical axis contract, варианты A/B/C, DoD |
 | 72c6557 | `utils/collect_meteo_data.py`, `utils/downloaders/gfs_downloader.py`, `tests/*` | DT-10-3 (Вариант A) + DT-10-4 (strict glob) |
-| (текущий) | `docs/*` | Финализация: DT-10-3/4 закрыты, DT-11-1 зарегистрирован, downstream-чек |
+| 9392c6b | `docs/*` | Финализация: DT-10-3/4 закрыты, DT-11-1 зарегистрирован, downstream-чек |

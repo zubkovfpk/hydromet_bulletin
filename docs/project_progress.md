@@ -75,11 +75,11 @@ pie
 | DT-01 | ~~**[Blocker #3]**~~ **Закрыт (сессия 10, MVP).** GFS GRIB2 → NetCDF conversion: реализован Вариант A (`_convert_grib_to_netcdf` + `convert_existing` в `gfs_downloader.py`, sidecar `.nc`). 40/40 `.nc` создаются. `collect_meteo_data` находит и читает все 9 переменных. DoD подтверждён первым dry-run `forecast_morning.py --date 20260415`. | — | Закрыт |
 | DT-10-1 | Unit/integration тест `_convert_grib_to_netcdf` с реальным `.pgrb2` — проверка маппинга переменных на реальных данных | medium | Сессия 11 |
 | DT-10-2 | Изменить default `GFS_ENABLE_CONVERSION_TO_NETCDF` в `config.example.ini` с `false` на `true` | low | Сессия 11 |
-| DT-10-3 | ~~**[Blocker #4]**~~ **Закрыт (сессия 11, Вариант A).** Удалён `.T` в meshgrid `collect_meteo_data.py`. Маска `(721,1440)` совпадает с данными `(721,1440,n)`. Dry-run: `mask shape=(721,1440)`, `cells_inside=236`, `ValueError` снят. Downstream-чек: ни один downstream-модуль не предполагает `(n_lon, n_lat)` — все используют `[:,:,n]`. DoD выполнен. | — | Закрыт |
-| DT-10-4 | ~~**[medium]**~~ **Закрыт (сессия 11).** `convert_existing()` glob теперь фильтрует `p.suffix.lower() != ".nc"` — sidecar-файлы исключены из GRIB2-парсинга. | — | Закрыт |
+| DT-10-3 | ~~**[Blocker #4]**~~ **Закрыт (сессия 11, Вариант A, 72c6557).** Удалён `.T` в meshgrid `collect_meteo_data.py`: `Lon, Lat = np.meshgrid(lon_arr, lat_arr)` (no `.T`). Маска `(721,1440)` совпадает с данными `(721,1440,n)`. Dry-run: `mask shape=(721,1440)`, `cells_inside=236`, `ValueError` снят. Downstream-чек: ни один downstream-модуль не предполагает `(n_lon, n_lat)` — все используют `[:,:,n]`. DoD выполнен. | — | Закрыт |
+| DT-10-4 | ~~**[medium]**~~ **Закрыт (сессия 11, 72c6557).** `convert_existing()` glob теперь фильтрует `p.suffix.lower() != ".nc"` — sidecar `.nc`-файлы не открываются как GRIB2. Тест `test_convert_existing_skips_paths_with_nc_suffix_dt10_4` passed. | — | Закрыт |
 | DT-10-5 | `_build_mask` Python-цикл 721×1440 (~1M ит.) через `shapely Point.within` — ~25–30 с. **Deferred** (сессия 11): фактическое время построения маски ~25–30 с не блокирует dry-run; оптимизация через `geopandas.sjoin` / bbox Каспия остаётся follow-up при росте времени выполнения. | low | Сессия 12+ |
 | DT-10-6 | Симметрия `forecast_evening.py`: добавить `GFSDownloader.convert_existing()` pre-conversion hook аналогично `forecast_morning.py`. Без этого вечерний dry-run упадёт на `FileNotFoundError`. Дополнительно: `forecast_evening.py` использует устаревший import-стиль `from utils import collect_meteo_data`. | high | Сессия 12 |
-| DT-11-1 | **[Blocker #5 — Сессия 12]** `FileNotFoundError: No CMEMS .nc files found for run_date=20260415` в `collect_wave_data`. CMEMS-файлы для тестовой даты не загружены. Необходимо: запустить `fetch_inputs.py` для получения CMEMS-данных перед повторным dry-run или создать mock-NC. | **high** | Сессия 12 |
+| DT-11-1 | **[Blocker #5 — Сессия 12]** **Title:** CMEMS .nc not found for run\_date in collect\_wave\_data. **Discovered:** session 11, dry-run `py forecast_morning.py --date 20260415`. **Symptom:** `FileNotFoundError: No CMEMS .nc files found for run_date=20260415`. **Stage:** `collect_wave_data` (следующая стадия после `collect_meteo_data`). **Likely cause:** локально отсутствуют CMEMS `.nc` за указанную дату (test date 20260415), либо неверный каталог/шаблон поиска в storage; требуется разделить case «данные не загружены» vs «баг lookup-пути». **DoD:** воспроизведение локально с актуальной датой + подтверждение что это missing data; при баге lookup — отдельная задача в сессии 12. **Blocks:** полный E2E dry-run до `.docx`. **Related:** DT-10-3 (closed), DT-10-4 (closed). | **high** | Сессия 12 |
 | DT-02 | Normalizing/preprocessing layer для GFS | medium | После Processing layer adaptation |
 | DT-03 | Downstream validation перед `doc_builder.py` | low | После validate_outputs v1 |
 | DT-04 | Soft quality rules (физ. диапазоны, NaN ratio, sanity checks) | low | После MVP validate_outputs |
@@ -91,7 +91,7 @@ pie
 | DT-08-2 | При cron-пересечении morning + evening оба процесса пишут в один `hydromet.log` через раздельные `FileHandler` — строки могут чередоваться. Решение: раздельные `hydromet_morning.log` / `hydromet_evening.log` или `SocketHandler`. | medium | Сессия 9 |
 | DT-08-3 | `FileHandler` пишет без ограничения размера; лог растёт неограниченно при ежедневном cron. Решение: `RotatingFileHandler(maxBytes=5MB, backupCount=7)`. | medium | Сессия 9 |
 | DT-08-4 | Если процесс в Docker не под root, `mkdir` для `/app/logs/` может дать `PermissionError`. Решение: `RUN mkdir -p /app/logs && chown ...` в `Dockerfile`; проверить при следующем Docker-тесте. | medium | Сессия 9 |
-| DT-08-5 | `test_retry_on_bad_url` — known flaky test (падает если GRIB2 уже существует локально). Сессия 11: 1 xfailed — **не является регрессией сессии 11** (поведение идентично до фикса). | low | Сессия 9 |
+| DT-08-5 | `test_retry_on_bad_url` — known flaky test (падает если GRIB2 уже существует локально). **НЕ регресс сессии 11**: полный pytest: 42 passed, 1 failed (DT-08-5), 4 skipped — поведение идентично до фикса 72c6557. | low | Сессия 9 |
 | DT-08-6 | Нет unit-теста для `shapefile_dir=None` — проверки, что fallback строит `basedir/data/shapefiles`. Решение: добавить 1 unit-тест в `tests/test_processing_layout_paths.py`. | low | Сессия 9 |
 | DT-08-7 | `shapefile_dir` стал вторым позиционным параметром в `collect_meteo_data()` / `collect_wave_data()`, что рискованно для callers с positional args. Решение: добавить `*` в сигнатуры для принудительного keyword-only. | low | Сессия 9 |
 
@@ -103,19 +103,26 @@ pie
 - DT-10-4 ✅ закрыт (Cursor, 72c6557): strict GRIB glob в `convert_existing`.
 - DT-10-5 deferred: ~25–30 с не блокирует dry-run.
 - Тесты: 23 passed + 1 xfailed, 42 passed + 1 failed (DT-08-5, не регресс).
-- DoD сессии 11 ✅: `broadcast_to` не бросает `ValueError`; dry-run прошёл `collect_meteo_data`; контракт ingestion/processing не нарушен.
+- DoD сессии 11 ✅:
+  - `ValueError` на broadcast-маске устранён
+  - dry-run проходит `collect_meteo_data`, доходит до `collect_wave_data`
+  - контракт ingestion/processing не нарушен
+  - целевые тесты: 23 passed, 1 xfailed
+  - полный pytest: 42 passed, 1 failed (DT-08-5 known flaky, не регресс), 4 skipped
 - Новый blocker: DT-11-1 (CMEMS `.nc` not found).
 
 **Downstream-чеклист (Windsurf, сессия 11):**
 
-| Модуль / место | Паттерн доступа | Предположение `(n_lon,n_lat)`? |
-|---|---|---|
-| `forecast_morning.py` стр. 121–138 | `meteo[key][:, :, n]` | ✅ Нет |
-| `forecast_evening.py` стр. 116–133 | `meteo[key][:, :, n]` | ✅ Нет |
-| `wind_statistics.py` | `.flatten()`, element-wise | ✅ Нет |
-| `precip_statistics.py` | boolean indexing | ✅ Нет |
-| `temp_statistics.py` | `~np.isnan`, `np.quantile` | ✅ Нет |
-| `validate_outputs.py` | `arr.shape[:2]` relative, no hardcoded dims | ✅ Нет |
+| Модуль | Результат |
+|---|---|
+| `forecast_morning.py` стр. 121–138 | uses (lat, lon, time): OK |
+| `forecast_evening.py` стр. 116–133 | uses (lat, lon, time): OK |
+| `wind_statistics.py` | uses (lat, lon, time): OK |
+| `precip_statistics.py` | uses (lat, lon, time): OK |
+| `temp_statistics.py` | uses (lat, lon, time): OK |
+| `validate_outputs.py` | uses (lat, lon, time): OK |
+
+*DT-11-2 не создавался: подозрительных мест с `(lon, lat, ...)` не обнаружено.*
 
 **Следующий этап (сессия 12):**
 1. Запустить `fetch_inputs.py` для загрузки CMEMS-данных (DT-11-1, Blocker #5).
