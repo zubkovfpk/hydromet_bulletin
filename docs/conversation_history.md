@@ -1945,3 +1945,59 @@ Cursor уже реализовал **3-tier discovery** в `_discover_cmems_nc_f
 - `project_context.md` раздел 9: DT-11-1 обновлён (acbcfba), DT-12-1 добавлен.
 - `project_context.md` раздел 11.3: current deferred items обновлены.
 - `project_progress.md`: сессия 12 добавлена в хронологию; DT-11-1 расширен (варианты A/B/C, шаги I-III, git policy); DT-12-1 добавлен; секция плана сессии 12 создана.
+
+---
+
+### 2. Сессия 12 — шаг A: docs-only sync
+
+**Режим работы: Режим X** — критический путь до `.docx`. В сессии 12 закрываем только DT-11-1, DT-12-1 (axes), DT-12-2 (validation); stretch — E2E до `.docx`. Все остальные задачи осознанно deferred до sweep-сессии после успешного E2E.
+
+#### 2.1 Закрытие DT-11-1
+
+- **Статус:** ✅ Закрыт (сессия 12, Вариант A).
+- **Root cause:** lookup mismatch — файлы CMEMS присутствовали в nested-структуре, но прежняя логика не находила их. Причина не в отсутствии данных.
+- **Fix (Cursor, `acbcfba16c34f1d2b16559a4fd244082420542f1`):** 3-tier discovery в `_discover_cmems_nc_files()`: (1) flat `cmems/{YYYYMMDD}/*.nc`; (2) nested `cmems/**/mfwamglocep_{run_date}*.nc`; (3) legacy `waves/*.nc`. Диагностический вывод `Tried: [...]`.
+- **Evidence:** dry-run `--date 20260415`: `CMEMS wave files resolved: count=2`, `collect_wave_data` проходит без `FileNotFoundError`.
+
+#### 2.2 Развод коллизии DT-12-1 / DT-12-2
+
+Cursor параллельно предложил DT-12-1 под другим смыслом (validation). Решение: зафиксировать ID строго.
+
+**DT-12-1 — axes (переопределён):**
+- Title: wave axes MATLAB-legacy: `collect_wave_data` returns `(lon, lat, time)`.
+- Root cause: `.T` в `collect_wave_data.py` (~185, 192, 216–218), аналог DT-10-3.
+- Fix plan: Вариант A — убрать `.T`, транспозиция `(1,2,0)`, `H_Wave=(ny,nx,40)`, `np.ix_(lat_mask,lon_mask,...)`.
+- DoD: `Wave.shape = (n_lat, n_lon, n_days)`, unit-тест, dry-run без регрессии.
+
+**DT-12-2 — validation (новый):**
+- Title: `validate_outputs.assert_valid_for_bulletin` fails on wave horizon / high NaN.
+- Discovered: dry-run 20260415 после acbcfba. Symptom: `TemporalValidationError`, wave horizon 0 days.
+- Likely cause: следствие DT-12-1; CMEMS 2 файла (00+12) не исключён.
+- DoD: либо закрывается после DT-12-1, либо отдельный план.
+
+#### 2.3 Wave axis canon (нормативное правило)
+
+Зафиксировано в `project_context.md` раздел 5: MATLAB-стиль `.T` в `collect_wave_data` **ЗАПРЕЩЕНО**, аналогично `collect_meteo_data`. Канонический формат: `(n_lat, n_lon, n_days)`, lat-first.
+
+#### 2.4 Осознанный deferred (Режим X)
+
+| ID | Deferred до |
+|----|-------------|
+| DT-10-5 | sweep-сессия |
+| DT-10-6 | sweep-сессия |
+| DT-07-1 | отдельный PR |
+| DT-08-1..4, 6, 7 | sweep-сессия |
+| DT-08-5 | known flaky, мониторинг |
+
+#### 2.5 Git policy сессии 12
+
+- Cursor накапливает код-коммиты ЛОКАЛЬНО поверх `72c6557` и `acbcfba`.
+- Windsurf пушит только docs-коммиты.
+- Единый push всех кода — финальный шаг сессии 12 по явной команде пользователя.
+- `72c6557` и `acbcfba` остаются local до этой команды.
+
+#### 2.6 Обновлено в docs (шаг A)
+
+- `project_context.md` раздел 5: wave axis canon = нормативное правило, ЗАПРЕЩЕНО `.T`.
+- `project_context.md` раздел 9/11.3: DT-11-1 ✅ закрыт; DT-12-1 Blocker #7; DT-12-2 Blocker #8; дубликаты DT-08-3/4/6/7 удалены.
+- `project_progress.md`: DT-11-1 закрыт; DT-12-1 переопределён (Blocker #7); DT-12-2 добавлен (Blocker #8); DT-10-5/10-6 → Deferred (Режим X); сессия 12 план обновлён (Режим X, deferred table, git policy).

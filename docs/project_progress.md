@@ -78,10 +78,11 @@ pie
 | DT-10-2 | Изменить default `GFS_ENABLE_CONVERSION_TO_NETCDF` в `config.example.ini` с `false` на `true` | low | Сессия 11 |
 | DT-10-3 | ~~**[Blocker #4]**~~ **Закрыт (сессия 11, Вариант A, 72c6557).** Удалён `.T` в meshgrid `collect_meteo_data.py`: `Lon, Lat = np.meshgrid(lon_arr, lat_arr)` (no `.T`). Маска `(721,1440)` совпадает с данными `(721,1440,n)`. Dry-run: `mask shape=(721,1440)`, `cells_inside=236`, `ValueError` снят. Downstream-чек: ни один downstream-модуль не предполагает `(n_lon, n_lat)` — все используют `[:,:,n]`. DoD выполнен. | — | Закрыт |
 | DT-10-4 | ~~**[medium]**~~ **Закрыт (сессия 11, 72c6557).** `convert_existing()` glob теперь фильтрует `p.suffix.lower() != ".nc"` — sidecar `.nc`-файлы не открываются как GRIB2. Тест `test_convert_existing_skips_paths_with_nc_suffix_dt10_4` passed. | — | Закрыт |
-| DT-10-5 | `_build_mask` Python-цикл 721×1440 (~1M ит.) через `shapely Point.within` — ~25–30 с. **Deferred** (сессия 11): фактическое время построения маски ~25–30 с не блокирует dry-run; оптимизация через `geopandas.sjoin` / bbox Каспия остаётся follow-up при росте времени выполнения. | low | Сессия 12+ |
-| DT-10-6 | Симметрия `forecast_evening.py`: добавить `GFSDownloader.convert_existing()` pre-conversion hook аналогично `forecast_morning.py`. Без этого вечерний dry-run упадёт на `FileNotFoundError`. Дополнительно: `forecast_evening.py` использует устаревший import-стиль `from utils import collect_meteo_data`. | high | Сессия 12 |
-| DT-11-1 | **[Blocker #5]** **Title:** CMEMS .nc not found for run\_date in collect\_wave\_data. **Discovered:** session 11. **Symptom:** `FileNotFoundError: No CMEMS .nc files found for run_date=20260415`. **Cursor fix (acbcfba):** 3-tier discovery (flat dated → nested mfwamglocep pattern → legacy). **Варианты lookup-фикса:** A (реализован) — 3-tier discovery; B — изменить шаблон поиска; C — переименовать каталог хранилища. **Шаги I–III:** I: инвентаризация `data/storage/cmems/` — найти где реально лежат CMEMS NC; II: dry-run с валидной датой (сегодня или дата с загруженными данными); III: при lookup-mismatch — создать/исправить путь. **DoD:** dry-run `forecast_morning.py` проходит `collect_wave_data` без `FileNotFoundError`; `collect_wave_data` возвращает Wave-массив. **Blocks:** E2E dry-run до `.docx`. **Related:** DT-10-3 (closed), DT-12-1 (new). **Git policy:** код-коммиты Cursor НЕ пушатся в сессии 12. | **high** | Сессия 12 |
-| DT-12-1 | **[Blocker #6 — Сессия 12]** `collect_wave_data.py` возвращает `Wave` в `(lon, lat, 5)` — нарушает каноническую ориентацию `(lat, lon, 5)` (аналог DT-10-3). **Место:** строки 185 (`H_Wave=(nx,ny,40)`), 192 (`transpose(2,1,0)` → `(lon,lat,time)`), 212 (`np.ix_(lon_mask,lat_mask,...)`), 216–218 (`.T` в meshgrid). **Вариант A (рекомендован):** транспозиция `(1,2,0)` → `(lat,lon,time)`, `H_Wave=(ny_full,nx_full,40)`, `np.ix_(lat_mask,lon_mask,...)`, убрать `.T`, docstring `(n_lat,n_lon,5)`. **DoD:** `broadcast_to` маски не бросает `ValueError`; форма `Wave.shape = (lat_crop, lon_crop, 5)`. **Related:** DT-11-1. | **high** | Сессия 12 |
+| DT-10-5 | `_build_mask` Python-цикл 721×1440 (~1M ит.) через `shapely Point.within` — ~25–30 с. **Deferred** (сессия 11): фактическое время построения маски ~25–30 с не блокирует dry-run; оптимизация через `geopandas.sjoin` / bbox Каспия остаётся follow-up при росте времени выполнения. | low | Deferred (Режим X) |
+| DT-10-6 | Симметрия `forecast_evening.py`: добавить `GFSDownloader.convert_existing()` pre-conversion hook аналогично `forecast_morning.py`. Без этого вечерний dry-run упадёт на `FileNotFoundError`. Дополнительно: `forecast_evening.py` использует устаревший import-стиль `from utils import collect_meteo_data`. **Deferred (Режим X).** | medium | Deferred (Режим X) |
+| DT-11-1 | ~~**[Blocker #5]**~~ **Закрыт (сессия 12, Вариант A, acbcfba).** **Title:** CMEMS .nc not found for run\_date in collect\_wave\_data. **Root cause:** lookup mismatch (не «данные не загружены») — файлы CMEMS присутствовали в nested-структуре, но не находились прежней логикой. **Fix:** 3-tier discovery в `collect_wave_data.py` (flat `YYYYMMDD/` → nested `cmems/**/mfwamglocep_{run_date}*.nc` → legacy `waves/*.nc`) + диагностический вывод `Tried: [...]`. **Evidence:** dry-run `--date 20260415`: `CMEMS wave files resolved: count=2`, `collect_wave_data` проходит без `FileNotFoundError`. **DoD выполнен.** Код-коммит: `acbcfba16c34f1d2b16559a4fd244082420542f1` (локальный, push — только по команде пользователя). **Related:** DT-12-1 (axes, open), DT-12-2 (validation, open). | — | Закрыт |
+| DT-12-1 | **[Blocker #7 — Сессия 12]** **Title:** wave axes MATLAB-legacy: `collect_wave_data` returns `(lon, lat, time)`. **Discovered:** session 12. **Symptom:** результат `collect_wave_data` имеет форму `(n_lon, n_lat, n_days)` вместо канонической `(n_lat, n_lon, n_days)`. **Root cause:** `.T` в `collect_wave_data.py` (строки ~185, 192, 216–218), аналог DT-10-3 в meteo-ветке. **Fix plan:** Вариант A (рекомендован) — убрать `.T` (аналог решения DT-10-3): транспозиция `(1,2,0)`, `H_Wave=(ny_full,nx_full,40)`, `np.ix_(lat_mask,lon_mask,...)`, убрать `.T` в meshgrid, docstring `(n_lat,n_lon,5)`; Вариант B — транспонировать данные (нежелательно); Вариант C — вместе с рефакторингом `validate_outputs` (не в этой сессии). **DoD:** wave-массив имеет форму `(n_lat, n_lon, n_days)`, lat-first; unit-тест фиксирует ориентацию; dry-run проходит `collect_wave_data` без регрессии `FileNotFoundError`. **Blocks:** корректная работа `validate_outputs` для wave; полный E2E до `.docx`. **Related:** DT-10-3 (closed), DT-11-1 (closed), DT-12-2 (suspected effect). | **high** | Сессия 12 |
+| DT-12-2 | **[Blocker #8 — Сессия 12]** **Title:** `validate_outputs.assert_valid_for_bulletin` fails on wave horizon / high NaN after 3-tier discovery. **Discovered:** session 12, dry-run 20260415 после acbcfba. **Symptom:** `TemporalValidationError`, wave horizon 0 days, высокий NaN по волне. **Likely cause (hypothesis):** следствие DT-12-1 (оси `(lon,lat,time)` ломают временную/пространственную интерпретацию в `validate_outputs`); остаточная проблема данных не исключена (CMEMS даёт только 2 файла: 00 и 12) — требует повторной диагностики ПОСЛЕ фикса DT-12-1. **DoD:** либо симптомы исчезают после фикса DT-12-1 (тогда close), либо чётко сформулирован остаточный баг `validate_outputs` / данных, с отдельным планом. **Blocks:** полный E2E до `.docx`. **Related:** DT-12-1 (root cause suspect), DT-11-1 (closed). | **high** | Сессия 12 |
 | DT-02 | Normalizing/preprocessing layer для GFS | medium | После Processing layer adaptation |
 | DT-03 | Downstream validation перед `doc_builder.py` | low | После validate_outputs v1 |
 | DT-04 | Soft quality rules (физ. диапазоны, NaN ratio, sanity checks) | low | После MVP validate_outputs |
@@ -126,27 +127,36 @@ pie
 
 *DT-11-2 не создавался: подозрительных мест с `(lon, lat, ...)` не обнаружено.*
 
-## Сессия 12 — план
+## Сессия 12 — план (Режим X: критический путь до .docx)
 
 **Git policy сессии 12:**
-- Cursor накапливает локальные коммиты поверх `72c6557` — **НЕ пушит**.
-- Push по ветке `feature/bulletin-generation` разрешён ТОЛЬКО для docs-коммита в конце сессии и только после явной команды.
+- Cursor накапливает код-коммиты ЛОКАЛЬНО поверх `72c6557` и `acbcfba`.
+- Windsurf пушит только docs-коммиты.
+- Единый push всех локальных код-коммитов выполняется в финальном шаге сессии 12 по явной команде пользователя.
 
-**Pre-work Windsurf (сделано, текущий коммит):**
-- `project_context.md`: CMEMS ingestion contract, 3-tier lookup contract, wave axis canon, DT-12-1.
-- `project_progress.md`: DT-11-1 расширен (шаги I-III, варианты A/B/C), DT-12-1 добавлен.
+**Режим X — только критический путь:**
+Закрываем в сессии 12: **DT-11-1** (закрыт acbcfba), **DT-12-1** (axes), **DT-12-2** (validation). Stretch: E2E dry-run до `.docx`.
 
-**Задачи Cursor (локально):**
+**Осознанный deferred (НЕ в scope сессии 12, отдельная sweep-сессия после успешного E2E):**
 
-| Приоритет | Задача |
-|-----------|--------|
-| 1 | DT-11-1: проверить `data/storage/cmems/` — найти реальные CMEMS NC; dry-run с валидной датой |
-| 2 | DT-12-1: исправить ориентацию осей в `collect_wave_data.py` (Вариант A: transpose `(1,2,0)`, убрать `.T`) |
-| 3 | DT-10-6: добавить `convert_existing` hook в `forecast_evening.py`, исправить import-стиль |
-| 4 | Повторный E2E dry-run: `collect_wave_data` → статистика → `.docx` |
+| ID | Причина deferred |
+|----|------------------|
+| DT-10-5 | ~25–30 с не блокирует; оптимизация отдельной sweep-сессией |
+| DT-10-6 | `forecast_evening.py` симметрия — sweep-сессия после успешного E2E morning |
+| DT-07-1 | GFS cycle CLI-параметр — отдельный PR |
+| DT-08-1..4, 6, 7 | Logging, Docker, unit-tests — sweep-сессия |
+| DT-08-5 | Known flaky, не регресс; мониторинг без фиксации |
+
+**Задачи Cursor (локально, Режим X):**
+
+| # | Задача | DT |
+|---|--------|-----|
+| 1 | Исправить ориентацию осей в `collect_wave_data.py` (Вариант A) | DT-12-1 |
+| 2 | Диагностика `TemporalValidationError` после фикса DT-12-1 | DT-12-2 |
+| 3 | Повторный dry-run: `collect_wave_data` → статистика → `.docx` | stretch |
 
 **После отчёта Cursor (post-work Windsurf):**
-1. Прочитать diff всех локальных коммитов Cursor поверх `72c6557`.
-2. Arch review: правки локализованы, контракт не сломан, каноника `(lat,lon,time)` сохранена.
+1. Прочитать diff всех локальных коммитов Cursor поверх `acbcfba`.
+2. Arch review: оси `(lat,lon,time)` восстановлены, `validate_outputs` проходит, E2E до `.docx`.
 3. Downstream-чек wave callers: `forecast_morning.py`, `forecast_evening.py`, `doc_builder.py`.
 4. Обновить docs + коммит + push (только после явной команды).
