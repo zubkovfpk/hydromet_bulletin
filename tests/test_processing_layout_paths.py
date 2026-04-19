@@ -8,6 +8,7 @@ from utils.collect_meteo_data import (
     _resolve_gfs_data_dir,
 )
 from utils.collect_wave_data import (
+    _discover_cmems_nc_files,
     _resolve_cmems_wave_dir,
     _resolve_shapefile_path as _resolve_wave_shapefile_path,
     collect_wave_data,
@@ -101,6 +102,51 @@ def test_resolve_cmems_wave_dir_falls_back_to_legacy(tmp_path):
     assert resolved == legacy
 
 
+def test_discover_cmems_nc_files_nested_copernicus_layout(tmp_path):
+    """DT-11-1: files under data/storage/cmems/<product>/.../YYYY/MM/, not dated flat dir."""
+    run_date = "20260415"
+    deep = (
+        tmp_path
+        / "data"
+        / "storage"
+        / "cmems"
+        / "GLOBAL_ANALYSISFORECAST_WAV_001_027"
+        / "product"
+        / "2026"
+        / "04"
+    )
+    deep.mkdir(parents=True)
+    a = deep / "mfwamglocep_2026041500_R20260414_12H.nc"
+    b = deep / "mfwamglocep_2026041512_R20260414_12H.nc"
+    a.write_text("x", encoding="utf-8")
+    b.write_text("x", encoding="utf-8")
+
+    files, tried = _discover_cmems_nc_files(
+        base_dir=str(tmp_path),
+        run_date=run_date,
+        cmems_storage_subdir="data/storage/cmems",
+        legacy_waves_dir="waves",
+    )
+    assert files == [a, b]
+    assert any("nested glob" in t for t in tried)
+
+
+def test_discover_cmems_nc_files_prefers_flat_dated_dir(tmp_path):
+    run_date = "20260415"
+    flat = tmp_path / "data" / "storage" / "cmems" / run_date
+    flat.mkdir(parents=True)
+    one = flat / "mfwamglocep_2026041500.nc"
+    one.write_text("x", encoding="utf-8")
+
+    files, _tried = _discover_cmems_nc_files(
+        base_dir=str(tmp_path),
+        run_date=run_date,
+        cmems_storage_subdir="data/storage/cmems",
+        legacy_waves_dir="waves",
+    )
+    assert files == [one]
+
+
 @pytest.mark.parametrize(
     ("raw_cycle", "expected"),
     [
@@ -148,7 +194,8 @@ def test_collect_wave_data_raises_file_not_found_for_absent_dirs(tmp_path):
         )
     msg = str(exc_info.value)
     assert f"run_date={run_date}" in msg
-    assert "Checked:" in msg
+    assert "Tried:" in msg
+    assert "nested glob" in msg
 
 
 def test_resolve_shapefile_path_uses_structured_dir(tmp_path):

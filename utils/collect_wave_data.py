@@ -6,6 +6,9 @@ collect_wave_data.py
 вырезает область Каспийского моря, агрегирует по суткам.
 """
 
+from __future__ import annotations
+
+import logging
 from pathlib import Path
 from datetime import datetime, timedelta, date
 
@@ -13,6 +16,8 @@ import numpy as np
 import netCDF4 as nc
 import geopandas as gpd
 from shapely.geometry import Point
+
+logger = logging.getLogger(__name__)
 
 
 # Epoch CMEMS: часы с 1950-01-01
@@ -54,6 +59,51 @@ def _resolve_cmems_wave_dir(
     if new_layout_dir.exists():
         return new_layout_dir
     return Path(base_dir) / legacy_waves_dir
+
+
+def _discover_cmems_nc_files(
+    base_dir: str,
+    run_date: str,
+    cmems_storage_subdir: str,
+    legacy_waves_dir: str,
+) -> tuple[list[Path], list[str]]:
+    """
+    Locate CMEMS wave NetCDF files for ``run_date`` (YYYYMMDD).
+
+    Resolution order (DT-11-1):
+
+    1. **Flat layout** — ``{cmems_root}/{run_date}/*.nc`` (documented new layout).
+    2. **Nested layout** — ``{cmems_root}/**/mfwamglocep_{run_date}*.nc`` (Copernicus
+       toolbox often writes under product/year/month subfolders).
+    3. **Legacy** — ``{base_dir}/{legacy_waves_dir}/*.nc``.
+
+    Returns ``(files, tried_descriptions)`` for logging and error diagnostics.
+    """
+    base = Path(base_dir)
+    cmems_root = base / cmems_storage_subdir
+    tried: list[str] = []
+
+    flat_dir = cmems_root / run_date
+    tried.append(f"flat dated dir: {flat_dir}")
+    if flat_dir.is_dir():
+        direct = sorted(flat_dir.glob("*.nc"))
+        if direct:
+            return direct, tried
+
+    nested_pattern = f"mfwamglocep_{run_date}*.nc"
+    tried.append(f"nested glob under {cmems_root}: **/{nested_pattern}")
+    nested = sorted(cmems_root.glob(f"**/{nested_pattern}"))
+    if nested:
+        return nested, tried
+
+    legacy_dir = base / legacy_waves_dir
+    tried.append(f"legacy waves dir: {legacy_dir}")
+    if legacy_dir.is_dir():
+        legacy_files = sorted(legacy_dir.glob("*.nc"))
+        if legacy_files:
+            return legacy_files, tried
+
+    return [], tried
 
 
 def _resolve_shapefile_path(shapefile_dir: str) -> Path:
@@ -98,18 +148,27 @@ def collect_wave_data(
     if shapefile_dir is None:
         shapefile_dir = str(Path(base_dir) / "data" / "shapefiles")
 
-    wave_path = _resolve_cmems_wave_dir(
+    nc_files, tried_locations = _discover_cmems_nc_files(
         base_dir=base_dir,
         run_date=run_date,
         cmems_storage_subdir=cmems_storage_subdir,
         legacy_waves_dir=waves_dir,
     )
-    nc_files = sorted(wave_path.glob("*.nc"))
     if not nc_files:
+        detail = "\n  - ".join(tried_locations)
         raise FileNotFoundError(
             f"No CMEMS .nc files found for run_date={run_date}. "
-            f"Checked: {wave_path}"
+            "If CMEMS was never downloaded for this date, ingest data first (not a lookup bug). "
+            "If files exist on disk but are not under the flat dated folder, nested discovery "
+            "should find mfwamglocep_{date}*.nc under the CMEMS storage root. "
+            f"Tried:\n  - {detail}"
         )
+
+    logger.info(
+        "CMEMS wave files resolved: count=%d, dir=%s",
+        len(nc_files),
+        nc_files[0].parent,
+    )
 
     shp_path = _resolve_shapefile_path(shapefile_dir)
     if not shp_path.exists():
