@@ -2001,3 +2001,88 @@ Cursor параллельно предложил DT-12-1 под другим с�
 - `project_context.md` раздел 5: wave axis canon = нормативное правило, ЗАПРЕЩЕНО `.T`.
 - `project_context.md` раздел 9/11.3: DT-11-1 ✅ закрыт; DT-12-1 Blocker #7; DT-12-2 Blocker #8; дубликаты DT-08-3/4/6/7 удалены.
 - `project_progress.md`: DT-11-1 закрыт; DT-12-1 переопределён (Blocker #7); DT-12-2 добавлен (Blocker #8); DT-10-5/10-6 → Deferred (Режим X); сессия 12 план обновлён (Режим X, deferred table, git policy).
+
+---
+
+### 3. Сессия 12 — шаг C: финал и единый push
+
+**Цель шага:** arch review 75cf010, downstream-чек wave axis, закрыть DT-12-1, переформулировать DT-12-2 (confirmed root cause), обновить docs, выполнить единый push локальных код-коммитов.
+
+#### 3.1 Git fetch — фактический список коммитов перед push
+
+```
+git log origin/feature/bulletin-generation..HEAD --oneline:
+75cf010  fix(waves): drop MATLAB-legacy .T, enforce (lat, lon, time) canon (DT-12-1)
+```
+
+Факт: `72c6557` и `acbcfba` уже находились на origin (запушены ранее в ходе docs-коммитов шагов A/B). Единый код-push шага 12.C включает только `75cf010`.
+
+#### 3.2 Сверка 75cf010 с Вариантом A (ОК — расхождений нет)
+
+| Критерий | Результат |
+|----------|-----------|
+| Legacy `.T` у meshgrid удалены | ✅ `Lon, Lat = np.meshgrid(lon_crop, lat_crop)` — нет `.T` |
+| 3D transpose CMEMS → 2D-срезы | ✅ `hw = np.asarray(...)` `(time,lat,lon)`; `H_Wave[:,:,k] = hw[k+1,:,:]` |
+| Нет новых `transpose`/`swapaxes`/`moveaxis` | ✅ подтверждено |
+| `np.ix_` не используется | ✅ удалён; индексация `H_Wave[lat_mask,:,:][:,lon_mask,:]` |
+| `H_Wave` shape: `(ny_full, nx_full, 40)` = `(lat, lon, 40)` | ✅ |
+| 3-tier discovery (DT-11-1) не сломан | ✅ регрессионный тест `test_discover_cmems_empty_lists_tried_dt11_regression` |
+| Сигнатура `collect_wave_data` не изменена | ✅ |
+| Правки локализованы в `utils/collect_wave_data.py` + `tests/*` | ✅ |
+| `collect_meteo_data`, `validate_outputs`, `doc_builder`, конфиги — не тронуты | ✅ |
+
+#### 3.3 Downstream-чек wave axis canon
+
+| Модуль | Результат |
+|--------|-----------|
+| `forecast_morning.py` стр. 134–135 | `HWave[:, :, n]` — axis-neutral: OK |
+| `forecast_evening.py` стр. 129–130 | `HWave[:, :, n]` — axis-neutral: OK |
+| `validate_outputs.py` | `arr[:, :, idx]`, `arr.shape[2]` — axis-neutral: OK |
+| `doc_builder.py` | wave не используется напрямую: OK |
+| Статистические модули | wave не передаётся в stats-модули (inline `nanmin/nanmax`): OK |
+
+*DT-12-3 не создавался: ни одного места с жёсткой зависимостью от `(lon, lat, ...)` порядка не обнаружено.*
+
+#### 3.4 DT-12-1 → Закрыт
+
+Вариант A реализован без отклонений. DoD выполнен: `Wave.shape = (n_lat, n_lon, n_days)`, unit-тест зелёный, dry-run 20260415 проходит `collect_wave_data`.
+
+#### 3.5 DT-12-2 — переформулировка (confirmed root cause)
+
+**Root cause (confirmed):** `start_date` и `end_date` в `collect_wave_data` берутся как `time_arr[0]` из первого и последнего `.nc` соответственно. При наборе из 2 файлов (00 и 12) оба timestamp — начало одного и того же дня → Δdays = 0.
+
+**Not a cause:** ориентация осей DT-12-1 — формы `Hwave=(73,109,40)` и `mask=(73,109)` корректны, broadcast проходит.
+
+**DoD (варианты):** (1) корректировка логики дат в `collect_wave_data`; (2) уточнение strict-порогов `validate_outputs`; (3) догрузка полного набора CMEMS.
+
+**Scope note:** не в сессию 12 (Режим X). Критический путь сессии 13.
+
+#### 3.6 Pytest итоги сессии 12
+
+- Целевые тесты: **20 passed + 1 xfailed** (DT-08-5 expected failure).
+- Полный pytest: **46 passed + 1 failed** (DT-08-5 — known flaky, не регресс сессий 11/12).
+
+#### 3.7 Режим X — deferred подтверждён
+
+| ID | Deferred до |
+|----|-------------|
+| DT-10-5 | sweep-сессия |
+| DT-10-6 | sweep-сессия |
+| DT-07-1 | отдельный PR |
+| DT-08-1..4, 6, 7 | sweep-сессия |
+| DT-08-5 | known flaky, мониторинг |
+
+#### 3.8 Git push
+
+**Docs-коммит:** `docs(session-12/C): close DT-12-1, reformulate DT-12-2, downstream wave axis check, session 12 DoD` → SHA в docs-push.
+
+**Единый код-push:** `eb33934...<docs-C SHA>` (docs) + `75cf010` — `fast-forward`, `--force` не использовался.
+
+**Итоговое состояние origin/feature/bulletin-generation после push:** 75cf010 — HEAD (после docs-C коммита следует за ним).
+
+#### 3.9 Следующий шаг — сессия 13
+
+Фокус: **DT-12-2** — wave horizon 0 days + NaN ~99.98%.
+- Вариант 1: fix логики дат в `collect_wave_data` (range по всем `time_arr`).
+- Вариант 2: уточнение `validate_outputs` (NaN threshold, horizon formula).
+- Вариант 3: догрузка полного набора временных шагов CMEMS.
