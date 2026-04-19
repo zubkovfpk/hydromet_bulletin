@@ -139,7 +139,8 @@ def collect_wave_data(
 
     Returns
     -------
-    Wave       : np.ndarray (nx, ny, 5) — средняя высота волн по суткам
+    Wave       : np.ndarray (n_lat, n_lon, 5) — средняя высота волн по суткам
+                 (каноника processing layer: lat, lon, time — как meteo после DT-10-3)
     start_date : datetime
     end_date   : datetime
     """
@@ -174,51 +175,57 @@ def collect_wave_data(
     if not shp_path.exists():
         raise FileNotFoundError(f"Shapefile not found: {shp_path}")
 
-    # Глобальный буфер: 4320×2041×40 (как в оригинале)
-    # Размер определим по первому файлу
+    # Глобальный буфер: (n_lat, n_lon, 40) — каноника lat-first, без 3D transpose от NetCDF
+    # VHM0_WW в CMEMS: (time, latitude, longitude); заполняем H_Wave[t_slot] = hw[t, :, :]
     with nc.Dataset(nc_files[0]) as ds0:
         lon_full = ds0.variables["longitude"][:].data
         lat_full = ds0.variables["latitude"][:].data
         nx_full = len(lon_full)
         ny_full = len(lat_full)
 
-    H_Wave = np.zeros((nx_full, ny_full, 40))
+    H_Wave = np.zeros((ny_full, nx_full, 40))
     start_date = end_date = None
     i, j = 3, 6  # индексы слоёв (0-based: 3:7 = шаги 4-7)
 
     for idx, nc_file in enumerate(nc_files):
         with nc.Dataset(nc_file) as ds:
-            h_wave = ds.variables["VHM0_WW"][:]  # (time, lat, lon) → транспонируем
-            h_wave = np.transpose(h_wave.data, (2, 1, 0))  # → (lon, lat, time)
+            hw = np.asarray(ds.variables["VHM0_WW"][:])  # (time, lat, lon)
             time_arr = ds.variables["time"][:].data
 
             if idx == 0:
-                H_Wave[:, :, 0:3] = h_wave[:, :, 1:4]
+                for k in range(3):
+                    H_Wave[:, :, k] = hw[k + 1, :, :]
                 start_date = _hours_to_date(time_arr[0])
             elif idx == len(nc_files) - 1:
-                H_Wave[:, :, 39] = h_wave[:, :, 0]
+                H_Wave[:, :, 39] = hw[0, :, :]
                 end_date = _hours_to_date(time_arr[0])
             else:
                 end_idx = min(i + 4, 40)
                 take = end_idx - i
-                H_Wave[:, :, i:end_idx] = h_wave[:, :, :take]
+                for k in range(take):
+                    H_Wave[:, :, i + k] = hw[k, :, :]
                 i += 4
                 j += 4
 
-    # Обрезка по области Каспия
+    # Обрезка по области Каспия (ось 0 = lat, ось 1 = lon)
     lon_mask = (lon_full >= lon_bounds[0]) & (lon_full <= lon_bounds[1])
     lat_mask = (lat_full >= lat_bounds[0]) & (lat_full <= lat_bounds[1])
 
-    Hwave = H_Wave[np.ix_(lon_mask, lat_mask, np.arange(40))]
+    Hwave = H_Wave[lat_mask, :, :][:, lon_mask, :]
     lon_crop = lon_full[lon_mask]
     lat_crop = lat_full[lat_mask]
 
-    Lon_raw, Lat_raw = np.meshgrid(lon_crop, lat_crop)
-    Lon = Lon_raw.T
-    Lat = Lat_raw.T
+    Lon, Lat = np.meshgrid(lon_crop, lat_crop)
 
-    # Маска акватории
+    # Маска акватории (n_lat, n_lon) — как в collect_meteo_data после DT-10-3
     mask = _build_mask(Lon, Lat, str(shp_path))
+
+    logger.info(
+        "Wave stack: Hwave=%s, mask=%s, inside=%d",
+        Hwave.shape,
+        mask.shape,
+        int(np.sum(mask)),
+    )
 
     # Агрегация: 8 шагов × 3ч = 24ч → 5 суток
     Wave = np.full((*Hwave.shape[:2], 5), np.nan)
