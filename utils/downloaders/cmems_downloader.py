@@ -11,6 +11,39 @@ from pathlib import Path
 from typing import Callable
 
 
+def resolve_cmems_forecast_hours(
+    cfg: configparser.ConfigParser,
+    logger: logging.Logger | None = None,
+) -> int:
+    """
+    Resolve CMEMS forecast horizon in hours.
+
+    Compat-window beta:
+    1) prefer [CMEMS_FORECAST] forecast_hours
+    2) fallback to forecast_days * 24 with deprecation warning
+    3) fallback to default 120h with warning
+    """
+    log = logger or logging.getLogger(__name__)
+
+    if cfg.has_option("CMEMS_FORECAST", "forecast_hours"):
+        return cfg.getint("CMEMS_FORECAST", "forecast_hours")
+
+    if cfg.has_option("CMEMS_FORECAST", "forecast_days"):
+        days = cfg.getint("CMEMS_FORECAST", "forecast_days")
+        hours = int(days) * 24
+        log.warning(
+            "[CMEMS_FORECAST] forecast_days is deprecated; use forecast_hours. "
+            "Value derived as %dh.",
+            hours,
+        )
+        return hours
+
+    log.warning(
+        "[CMEMS_FORECAST] neither forecast_hours nor forecast_days set; using default 120h."
+    )
+    return 120
+
+
 class CMEMSDownloader:
     """Wrapper over CMEMS fetch flow described in project docs.
 
@@ -38,7 +71,7 @@ class CMEMSDownloader:
         self.timeout_seconds = self.cfg.getint("DOWNLOAD", "download_timeout_seconds", fallback=600)
         self.max_retries = self.cfg.getint("DOWNLOAD", "download_retry_count", fallback=3)
         self.retry_delay_seconds = self.cfg.getint("DOWNLOAD", "download_retry_delay_seconds", fallback=30)
-        self.forecast_days = self.cfg.getint("CMEMS_FORECAST", "forecast_days", fallback=5)
+        self.forecast_hours = resolve_cmems_forecast_hours(self.cfg, self.logger)
         self.download_mode = self.cfg.get(
             "CMEMS_SOURCES",
             "cmems_download_mode",
@@ -210,7 +243,7 @@ class CMEMSDownloader:
         try:
             day = datetime.strptime(date, "%Y%m%d").replace(tzinfo=timezone.utc)
             start_datetime = day
-            end_datetime = day + timedelta(days=max(1, self.forecast_days))
+            end_datetime = day + timedelta(hours=max(1, self.forecast_hours))
         except ValueError:
             self.logger.exception("CMEMS: invalid date (expected YYYYMMDD): %s", date)
             return False
