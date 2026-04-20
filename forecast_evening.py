@@ -12,7 +12,7 @@ import configparser
 import logging
 import time
 import numpy as np
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from utils import (
@@ -24,10 +24,57 @@ from utils import (
     create_bulletin_doc,
     send_bulletin,
 )
+from utils.collect_wave_data import _discover_cmems_nc_files
+from utils.downloaders.cmems_downloader import resolve_cmems_forecast_hours
 from utils.validate_outputs import assert_valid_for_bulletin
 
 # ── Логирование ──────────────────────────────────────────────────────────────
 logger = logging.getLogger(__name__)
+
+
+def _resolve_effective_forecast_hours(
+    cfg: configparser.ConfigParser,
+    forecast_hours_override: int | None,
+) -> int:
+    if forecast_hours_override is not None:
+        return int(forecast_hours_override)
+    return int(resolve_cmems_forecast_hours(cfg, logger))
+
+
+def _resolve_run_date_for_dry_run(
+    *,
+    explicit_run_date: str | None,
+    base_dir: str,
+    cmems_storage_subdir: str,
+) -> str:
+    if explicit_run_date:
+        logger.info("Dry-run run_date=%s (explicit --date, fallback disabled)", explicit_run_date)
+        return explicit_run_date
+
+    today_utc = datetime.now(timezone.utc).date()
+    today_str = today_utc.strftime("%Y%m%d")
+    files_today, _ = _discover_cmems_nc_files(
+        base_dir=base_dir,
+        run_date=today_str,
+        cmems_storage_subdir=cmems_storage_subdir,
+        legacy_waves_dir="waves",
+    )
+    if files_today:
+        logger.info("Dry-run run_date=today=%s (UTC)", today_str)
+        return today_str
+
+    prev_str = (today_utc - timedelta(days=1)).strftime("%Y%m%d")
+    files_prev, _ = _discover_cmems_nc_files(
+        base_dir=base_dir,
+        run_date=prev_str,
+        cmems_storage_subdir=cmems_storage_subdir,
+        legacy_waves_dir="waves",
+    )
+    if files_prev:
+        logger.info("Dry-run run_date=today-1=%s (UTC) — no CMEMS for today", prev_str)
+        return prev_str
+
+    raise FileNotFoundError("No CMEMS .nc for today UTC nor today-1; check ingestion")
 
 
 def _configure_logging(cfg: configparser.ConfigParser) -> None:
@@ -52,7 +99,8 @@ def _configure_logging(cfg: configparser.ConfigParser) -> None:
 
 
 def run_evening(cfg: configparser.ConfigParser,
-                run_date: str | None = None) -> str | None:
+                run_date: str | None = None,
+                forecast_hours_override: int | None = None) -> str | None:
     """
     Основная функция вечернего бюллетеня.
 
@@ -77,6 +125,16 @@ def run_evening(cfg: configparser.ConfigParser,
     gfs_storage_subdir = cfg.get("GFS_STORAGE", "GFS_OUTPUT_DIR", fallback="data/storage/gfs")
     cmems_storage_subdir = cfg.get("CMEMS_STORAGE", "CMEMS_OUTPUT_DIR", fallback="data/storage/cmems")
     gfs_cycle = cfg.get("GFS_SOURCES", "GFS_CYCLES", fallback="00z").split(",")[0].strip()
+    effective_forecast_hours = _resolve_effective_forecast_hours(cfg, forecast_hours_override)
+    if forecast_hours_override is not None:
+        logger.info("CMEMS forecast_hours=%d (from CLI override)", effective_forecast_hours)
+    else:
+        logger.info("CMEMS forecast_hours=%d (from config)", effective_forecast_hours)
+    effective_run_date = _resolve_run_date_for_dry_run(
+        explicit_run_date=run_date,
+        base_dir=base_dir,
+        cmems_storage_subdir=cmems_storage_subdir,
+    )
 
     try:
         # ── 1. Загрузка данных ────────────────────────────────────────────
@@ -85,7 +143,7 @@ def run_evening(cfg: configparser.ConfigParser,
         meteo = collect_meteo_data(
             base_dir=base_dir,
             shapefile_dir=shapefile_dir,
-            run_date=run_date,
+            run_date=effective_run_date,
             cycle=gfs_cycle,
             gfs_storage_subdir=gfs_storage_subdir,
         )
@@ -94,13 +152,14 @@ def run_evening(cfg: configparser.ConfigParser,
         HWave, start_date, end_date = collect_wave_data(
             base_dir=base_dir,
             shapefile_dir=shapefile_dir,
-            run_date=run_date,
+            run_date=effective_run_date,
             cmems_storage_subdir=cmems_storage_subdir,
         )
         assert_valid_for_bulletin(
             meteo_data=meteo,
             wave_data=(HWave, start_date, end_date),
             strict=True,
+            forecast_hours=effective_forecast_hours,
         )
 
         # ── 2. Формирование контента ──────────────────────────────────────
@@ -191,10 +250,11 @@ def run_evening(cfg: configparser.ConfigParser,
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Вечерний метеобюллетень")
     parser.add_argument("--date",   default=None,         help="Дата YYYYMMDD")
+    parser.add_argument("--forecast-hours", type=int, default=None, help="Горизонт прогноза CMEMS в часах")
     parser.add_argument("--config", default="config.ini", help="Путь к config.ini")
     args = parser.parse_args()
 
     cfg = configparser.ConfigParser()
     cfg.read(args.config, encoding="utf-8")
 
-    run_evening(cfg=cfg, run_date=args.date)
+    run_evening(cfg=cfg, run_date=args.date, forecast_hours_override=args.forecast_hours)
