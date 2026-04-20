@@ -2272,3 +2272,121 @@ Deferred без изменений: DT-10-5, DT-10-6, DT-08-5, DT-07-1, DT-08-1.
 - Не удалять `forecast_days` в 13.B (только deprecated fallback).
 - `fffc359` (Part 1) — не трогать (не amend, не rebase).
 - Если после Part 2 + DT-13-1 остаётся strict-блокер — подготовить формулировку нового DT для шага 13.C, не расширять scope самостоятельно.
+
+---
+
+### Сессия 13, шаг C — финальный docs sync и единый push (Windsurf)
+
+**Дата:** 20 апреля 2026 г.
+
+#### 1. Запрос пользователя
+
+Финальная синхронизация документации и единый git push всех локальных код-коммитов сессии 13. Строгие требования:
+- Только docs + git операции; никакого кода, конфигов, Docker, скриптов.
+- Никакого force push, rebase, amend, squash, cherry-pick.
+- Read-only проверка трёх локальных коммитов против инвариантов 13.B.
+- Downstream check: `forecast_hours` явно передаётся в callers `validate_outputs`.
+- Обновление `project_progress.md`, `project_context.md`, `conversation_history.md`.
+
+#### 2. Git verification
+
+**Результат `git fetch origin` + `git log`:**
+- Локальный HEAD: `d377661` > `8055651` > `8e56709` > `8e942d7` (origin HEAD).
+- Три кода-коммита впереди origin: `d377661`, `8055651`, `8e56709` — точно совпадает с ожидаемым. ✅
+
+#### 3. Read-only diff verification трёх коммитов
+
+**8e56709 (DT-13-1) — `utils/downloaders/cmems_downloader.py`, `config.example.ini`, `tests/test_cmems_forecast_hours_config.py`:**
+- ✅ `forecast_days` НЕ удалён (присутствует в `config.example.ini`).
+- ✅ Приоритет: `forecast_hours` → `forecast_days × 24` (deprecated warning) → default 120h.
+- ✅ Deprecation warning: `log.warning("[CMEMS_FORECAST] forecast_days is deprecated; use forecast_hours. Value derived as %dh.", hours)`.
+- ✅ `config.example.ini`: добавлен `forecast_hours = 120`, `forecast_days = 5` оставлен.
+- ✅ `config.ini` (gitignored): `forecast_hours = 120`, `forecast_days = 5` — согласованы.
+- ✅ Новые файлы: не затронуты `collect_wave_data`, `collect_meteo_data`, `doc_builder`, `send_bulletin`.
+
+**8055651 (DT-13-2 + CLI DT-13-1) — `forecast_morning.py`, `forecast_evening.py`, `tests/test_forecast_date_policy.py`:**
+- ✅ Explicit `--date` полностью отключает fallback (`if explicit_run_date: return explicit_run_date`).
+- ✅ Без `--date`: today (UTC) → fallback today-1 → `FileNotFoundError "No CMEMS .nc for today UTC nor today-1; check ingestion"`.
+- ✅ Проверка через `_discover_cmems_nc_files` — только CMEMS; GFS не проверяется (→ DT-13-3).
+- ✅ CLI флаг `--forecast-hours` с `type=int`, без парсинга суффиксов; CLI > config.
+- ✅ `forecast_morning.py` и `forecast_evening.py` обновлены симметрично.
+
+**d377661 (DT-12-2 Part 2) — `utils/validate_outputs.py`, `tests/test_validate_outputs.py`:**
+- ✅ `.days` не используется в `_validate_dates`.
+- ✅ `horizon_hours_actual = (end_date − start_date).total_seconds() / 3600.0`.
+- ✅ Проверка `horizon_hours_actual >= forecast_hours − tol_hours`.
+- ✅ При `forecast_hours = None` → error `"missing_forecast_hours"`.
+- ✅ `tol_hours = 0` по умолчанию в API; код-реализация `tol_hours = 3` — в сессии 14.
+- ✅ Затронуты только `utils/validate_outputs.py` и тесты.
+- ✅ Все axes-canon паттерны (`arr[:,:,idx]`, `arr.shape[2]`) не изменены.
+
+**Общие инварианты:**
+- ✅ `collect_wave_data.py` не тронут (осевой контракт DT-12-1 сохранён).
+- ✅ `collect_meteo_data.py` не тронут (DT-10-3 не регрессировал).
+- ✅ `fffc359` не тронут (Part 1 DT-12-2 сохранён).
+- ✅ Нет новых `transpose`, `swapaxes`, `.T`, `np.ix_`.
+
+#### 4. Downstream check: forecast_hours передаётся в callers
+
+- `forecast_morning.py`: `assert_valid_for_bulletin(..., forecast_hours=effective_forecast_hours)` ✅
+- `forecast_evening.py`: `assert_valid_for_bulletin(..., forecast_hours=effective_forecast_hours)` ✅
+- `effective_forecast_hours` = CLI override или `resolve_cmems_forecast_hours(cfg, logger)`.
+- `tol_hours` по умолчанию 0 в callers — нормативное значение 3 будет передано в сессии 14.
+
+#### 5. Диагностика 13.B — новые DT
+
+Выявленные в 13.B блокеры full E2E (не scope 13.C, но зафиксированы как DT):
+
+- **DT-13-3 (HIGH, сессия 14):** `_resolve_run_date_for_dry_run` не проверяет GFS storage. Dry-run 20260420 без `--date`: `run_date=today=20260420 (UTC)`, GFS storage dir не найден → `FileNotFoundError: No GFS .nc files found for run_date=20260420, cycle=00z`. Fix: симметричная проверка GFS.
+- **DT-13-4 (HIGH, сессия 14, clean migration):** `collect_meteo_data` дефолт `results_subdir = "Meteo_Parser_2026/results"` — legacy-каталог; `forecast_morning.py` не переопределяет. DT-13-5 поглощён. Fix: поменять дефолт на новый layout.
+- **DT-13-6 (LOW, sweep):** `files_per_cycle` drift — `config.ini`=5, `config.example.ini`=10.
+
+#### 6. Обновления docs
+
+**`docs/project_context.md`:**
+- Секция 5 («Ключевые технические решения»):
+  - Temporal contract bullet: Part 2 → закрыт (d377661); `fffc359` на origin с 8e942d7; tol_hours = 3 нормативное значение.
+  - `forecast_hours` parameter bullet: добавлена метка ✅ Реализовано (8e56709 + 8055651), удалено устаревшее замечание о рассогласовании config.
+  - Validation horizon semantics bullet: уточнена `tol_hours = 0` default в API, код-реализация tol_hours = 3 → сессия 14.
+  - **[NEW]** Dev environment runtime policy: нет автоматических процессов (cron/scheduler/service) на dev-машине; все запуски ручные; cron-выражения — настройки для будущего prod; агентам НЕ предполагать автоматическое появление данных.
+- Секция 9 («Deferred tasks»): DT-12-2, DT-13-1, DT-13-2 → закрыты; добавлены DT-13-3, DT-13-4, DT-13-6.
+- Секция 11.2 («Branch policy»):
+  - **[NEW]** docs-over-code push behavior: при push docs-коммита, являющегося потомком локальных код-коммитов, git fast-forward тянет код-коммиты. Штатный паттерн (сессии 12, 13). Не нарушение git policy.
+- Секция 11.3 («Deferred-task logging policy»): DT-12-2, DT-13-1, DT-13-2 → закрыты; добавлены DT-13-3, DT-13-4, DT-13-6.
+
+**`docs/project_progress.md`:**
+- DT-12-2 row: state → Закрыт (fffc359 + d377661); Part 2 закрыт с dry-run evidence; tol_hours=3 нормативное значение; Related обновлён.
+- DT-13-1 row: state → Закрыт (8e56709 + 8055651); Evidence pytest 13.B.
+- DT-13-2 row: state → Закрыт по scope; Реализовано (8055651) с деталями; Nota bene про GFS.
+- DT-08-5 row: добавлены pytest 13.B результаты.
+- **[NEW]** DT-13-3 row: OPEN / HIGH.
+- **[NEW]** DT-13-4 row: OPEN / HIGH, clean migration.
+- **[NEW]** DT-13-6 row: OPEN / LOW, sweep.
+- Секция «Сессия 13»: план → **итоги**; DoD ✅ с пунктами (a)–(g); Git policy выполнена; итоговый Режим X с DT-13-6.
+
+#### 7. Git commit (docs) и unified push
+
+**Docs коммит:** `docs(session-13/C): close DT-12-2/13-1/13-2, open DT-13-3/13-4/13-6, tol_hours=3 normative, dev runtime + push behavior policy`
+
+**Pre-push log (ожидаемый порядок):**
+1. `d377661` — fix(validate_outputs): compute wave horizon in hours against forecast_hours (DT-12-2 Part 2)
+2. `8055651` — feat(run): enforce dry-run date policy and add --forecast-hours override (DT-13-2/DT-13-1)
+3. `8e56709` — feat(config): migrate forecast_days to forecast_hours with compat-window beta (DT-13-1)
+4. `8e942d7` — docs(session-13/A.2): ... (origin HEAD до push)
+5. **[NEW]** docs-коммит 13.C
+
+**git push origin feature/bulletin-generation** (fast-forward, без force).
+
+#### 8. Нормативные значения, зафиксированные в 13.C
+
+| Параметр | Нормативное значение | Источник | Код-реализация |
+|----------|---------------------|----------|---------------|
+| `tol_hours` | 3 | docs (13.C) | Сессия 14 |
+| `forecast_hours` | 120 (= 5 сут × 24 ч) | config + code (DT-13-1) | Реализовано (8e56709) |
+| dry-run date | today (UTC) → today-1 | code (DT-13-2) | Реализовано (8055651) |
+
+#### 9. Критический путь сессии 14
+
+1. **DT-13-3** (HIGH): date policy + GFS availability check.
+2. **DT-13-4** (HIGH, clean migration): legacy `results_subdir` → новый layout.
+3. **Стартовая микро-задача:** код-реализация `tol_hours = 3` (config-ключ `validation_tol_hours` или константа).
