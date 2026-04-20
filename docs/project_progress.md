@@ -82,7 +82,7 @@ pie
 | DT-10-6 | Симметрия `forecast_evening.py`: добавить `GFSDownloader.convert_existing()` pre-conversion hook аналогично `forecast_morning.py`. Без этого вечерний dry-run упадёт на `FileNotFoundError`. Дополнительно: `forecast_evening.py` использует устаревший import-стиль `from utils import collect_meteo_data`. **Deferred (Режим X).** | medium | Deferred (Режим X) |
 | DT-11-1 | ~~**[Blocker #5]**~~ **Закрыт (сессия 12, Вариант A, acbcfba).** **Title:** CMEMS .nc not found for run\_date in collect\_wave\_data. **Root cause:** lookup mismatch (не «данные не загружены») — файлы CMEMS присутствовали в nested-структуре, но не находились прежней логикой. **Fix:** 3-tier discovery в `collect_wave_data.py` (flat `YYYYMMDD/` → nested `cmems/**/mfwamglocep_{run_date}*.nc` → legacy `waves/*.nc`) + диагностический вывод `Tried: [...]`. **Evidence:** dry-run `--date 20260415`: `CMEMS wave files resolved: count=2`, `collect_wave_data` проходит без `FileNotFoundError`. **DoD выполнен.** Код-коммит: `acbcfba16c34f1d2b16559a4fd244082420542f1` (локальный, push — только по команде пользователя). **Related:** DT-12-1 (axes, open), DT-12-2 (validation, open). | — | Закрыт |
 | DT-12-1 | ~~**[Blocker #7]**~~ **Закрыт (сессия 12, Вариант A, 75cf010).** **Title:** wave axes MATLAB-legacy: `collect_wave_data` returns `(lon, lat, time)`. **Root cause:** `.T` в `collect_wave_data.py` (стр. ~185, 192, 216–218). **Fix (75cf010):** удалены legacy `.T` у meshgrid; 3D transpose CMEMS заменён на 2D-срезы `H_Wave[:, :, slot] = hw[t, :, :]`; без новых `transpose`/`ix_`; индексация `H_Wave[lat_mask, :, :][:, lon_mask, :]`. **Evidence:** dry-run 20260415: `Hwave=(73,109,40)`, `mask=(73,109)`, `inside=2202`; `collect_wave_data` проходит без `FileNotFoundError`. **DoD выполнен.** **Related:** DT-10-3 (closed), DT-11-1 (closed), DT-12-2 (open, confirmed separate root cause). | — | Закрыт |
-| DT-12-2 | **[open / high — критический путь сессии 13]** **Title:** `validate_outputs.assert_valid_for_bulletin` fails on wave horizon (0 days) and high NaN after DT-12-1 fix. **Discovered:** session 12, dry-run `py forecast_morning.py --date 20260415` after 75cf010. **Symptom:** `TemporalValidationError` from `validate_outputs._validate_dates`: "Wave horizon looks suspicious: 0 day(s)"; Warning: NaN ratio ~99.98% in wave array under strict thresholds (`validate_wave_output`). **Stage:** `validate_outputs.assert_valid_for_bulletin(strict=True)`, после успешного прохождения `collect_wave_data`. **Root cause (confirmed):** `start_date` и `end_date` в `collect_wave_data` берутся как `time_arr[0]` из первого и последнего `.nc` соответственно; при наборе из 2 файлов (00 и 12) это даёт Δdays = 0. **Not a cause:** ориентация осей (DT-12-1 закрыт по варианту A, формы `Hwave=(73,109,40)` и `mask=(73,109)` корректны, broadcast проходит). **DoD:** либо корректировка логики дат в `collect_wave_data` (не trivial; требует согласования контракта с `validate_outputs`), либо уточнение правил `validate_outputs` (strict-пороги по NaN, формула horizon), либо догрузка полного набора временных шагов CMEMS. **Blocks:** stretch до `.docx`. **Related:** DT-12-1 (closed, не root cause), DT-11-1 (closed, 3-tier discovery не связан). **Scope note:** не берётся в сессию 12 (Режим X). Переносится в следующую сессию как отдельный критический путь до `.docx`. | **high** | Сессия 13 |
+| DT-12-2 | **[ready-for-implementation — критический путь сессии 13, Вариант 1 выбран]** **Title:** `validate_outputs.assert_valid_for_bulletin` fails on wave horizon (0 days) and high NaN after DT-12-1 fix. **Discovered:** session 12, dry-run `py forecast_morning.py --date 20260415` after 75cf010. **Symptom:** `TemporalValidationError` from `validate_outputs._validate_dates`: "Wave horizon looks suspicious: 0 day(s)"; Warning: NaN ratio ~99.98% in wave array under strict thresholds (`validate_wave_output`). **Stage:** `validate_outputs.assert_valid_for_bulletin(strict=True)`, после успешного прохождения `collect_wave_data`. **Root cause (confirmed):** `start_date` и `end_date` в `collect_wave_data` берутся как `time_arr[0]` из первого и последнего `.nc` соответственно; при наборе из 2 файлов (00 и 12 одной даты) оба timestamp на один и тот же день → Δdays = 0. **Explicit non-cause:** ориентация осей (DT-12-1 закрыт, `Hwave=(73,109,40)`, `mask=(73,109)`, broadcast проходит — подтверждено явно). **Выбранный вариант — Вариант 1:** корректировка логики дат в `collect_wave_data`: `start_date = _hours_to_date(min(time_arr_all))`, `end_date = _hours_to_date(max(time_arr_all))`, где `time_arr_all` — конкатенация `time_arr` из всех найденных `.nc`-файлов (3-tier discovery DT-11-1 не меняется). **Критерий выбора:** минимальное изменение в processing layer, не затрагивающее `validate_outputs` и не расширяющее ingestion-слой. **Вариант 2** (уточнение strict-порогов `validate_outputs`) — резервный; подключается только если после Варианта 1 остаётся strict-блокер по NaN/horizon, и только по явному согласованию пользователя; Cursor готовит текст DT-13-1 при необходимости. **Вариант 3** (догрузка полного набора CMEMS) — вне сессии 13. **DoD DT-12-2 / DoD сессии 13:** (1) `start`/`end` в `collect_wave_data` вычисляются по объединённому `time_arr` всех `.nc`; (2) `TemporalValidationError "Wave horizon looks suspicious: 0 day(s)"` не воспроизводится на dry-run 20260415; (3) 3-tier discovery DT-11-1 не регрессировал (`CMEMS count=2` для 20260415); (4) axes canon DT-12-1 не регрессировал (`Hwave=(73,109,40)`, `mask=(73,109)`); (5) `validate_outputs.assert_valid_for_bulletin(strict=True)` проходит без исключений; (6) целевые тесты зелёные; полный pytest — только DT-08-5 flaky; (7) stretch: `.docx` сгенерирован (путь фиксируется в отчёте). **Related:** DT-12-1 (closed, explicit non-cause), DT-11-1 (closed, 3-tier discovery не меняется). | **high** | Сессия 13 |
 | DT-02 | Normalizing/preprocessing layer для GFS | medium | После Processing layer adaptation |
 | DT-03 | Downstream validation перед `doc_builder.py` | low | После validate_outputs v1 |
 | DT-04 | Soft quality rules (физ. диапазоны, NaN ratio, sanity checks) | low | После MVP validate_outputs |
@@ -166,8 +166,28 @@ pie
 | DT-08-1..4, 6, 7 | Logging, Docker, unit-tests — sweep-сессия |
 | DT-08-5 | Known flaky, мониторинг без фиксации |
 
-**Сессия 13 — план:**
-- Критический путь: DT-12-2 (wave horizon 0 days + NaN ~99.98%).
-- Вариант 1: корректировка логики дат в `collect_wave_data` (start/end = range по всем time_arr, не только time_arr[0]).
-- Вариант 2: уточнение strict-порогов `validate_outputs` (horizon formula, NaN threshold).
-- Вариант 3: догрузка полного набора временных шагов CMEMS (>2 файлов).
+## Сессия 13 — план (шаг 13.A: docs pre-work выполнен)
+
+**Критический путь:** DT-12-2 → Вариант 1 (корректировка логики дат в `collect_wave_data`).
+
+**Dry-run эталон:** `py forecast_morning.py --date 20260415` (менять дату в сессии 13 запрещено).
+
+**Stretch-goal:** генерация `.docx` по итогам dry-run.
+
+**Git policy сессии 13:**
+- Cursor коммитит код ЛОКАЛЬНО поверх `a34399c`, НЕ пушит.
+- Windsurf в шаге 13.A сделал docs-коммит и запушил сразу.
+- Windsurf в шаге 13.C делает финальный docs-коммит и единый push всех локальных код-коммитов — ТОЛЬКО по явной команде пользователя.
+- `--force`, `--force-with-lease`, rebase публичной ветки — ЗАПРЕЩЕНЫ.
+
+**Режим X — deferred без изменений; попутных deferred в сессии 13 не брать автоматически; любое включение — только по явной команде пользователя, фиксируется отдельной строкой в DoD:**
+
+| ID | Deferred до |
+|----|-------------|
+| DT-10-5 | sweep-сессия |
+| DT-10-6 | sweep-сессия |
+| DT-07-1 | отдельный PR |
+| DT-08-1..4, 6, 7 | sweep-сессия |
+| DT-08-5 | known flaky, мониторинг |
+
+**DoD сессии 13:** см. DT-12-2 (пункты 1–7).

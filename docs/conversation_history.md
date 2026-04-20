@@ -2086,3 +2086,87 @@ git log origin/feature/bulletin-generation..HEAD --oneline:
 - Вариант 1: fix логики дат в `collect_wave_data` (range по всем `time_arr`).
 - Вариант 2: уточнение `validate_outputs` (NaN threshold, horizon formula).
 - Вариант 3: догрузка полного набора временных шагов CMEMS.
+
+---
+
+## Сессия 13
+
+### 1. Шаг 13.A — docs-only pre-work перед фиксом DT-12-2
+
+**Цель шага:** зафиксировать архитектурный контракт Варианта 1, перевести DT-12-2 в ready-for-implementation, записать DoD и git policy сессии 13.
+
+#### 1.1 Точка старта
+
+- origin HEAD = `a34399c` (`docs(session-12/C): close DT-12-1, reformulate DT-12-2, downstream wave axis check, session 12 DoD`)
+- Локальных код-коммитов перед шагом 13.A нет.
+
+**DT статусы на входе:**
+
+| ID | Статус |
+|----|--------|
+| DT-10-3 | ✅ Закрыт (сессия 11, 72c6557) |
+| DT-10-4 | ✅ Закрыт (сессия 11, 72c6557) |
+| DT-11-1 | ✅ Закрыт (сессия 12, acbcfba, 3-tier discovery) |
+| DT-12-1 | ✅ Закрыт (сессия 12, 75cf010, axes canon (lat,lon,time)) |
+| DT-12-2 | ⚠️ open, high — критический путь сессии 13 |
+| DT-10-5, 10-6, 07-1, 08-1..4,6,7, 08-5 | Deferred (Режим X) |
+
+#### 1.2 Решение пользователя
+
+- **Основной путь:** Вариант 1 — корректировка логики дат в `collect_wave_data`.
+- **Вариант 2** — резервный; подключается только если после Варианта 1 остаётся strict-блокер по NaN/horizon, и только по явному согласованию пользователя.
+- **Вариант 3** — вне сессии 13.
+
+**Критерий выбора Варианта 1:** минимальное изменение строго в processing layer (`collect_wave_data.py`); `validate_outputs` не трогается; ingestion-слой не расширяется; 3-tier discovery DT-11-1 не меняется; axes canon DT-12-1 не меняется.
+
+#### 1.3 Архитектурный контракт (зафиксирован в project_context.md, раздел 5)
+
+- `time_arr_all` = конкатенация `time_arr` из всех `.nc`-файлов, найденных 3-tier discovery.
+- `start_date = _hours_to_date(min(time_arr_all))`.
+- `end_date = _hours_to_date(max(time_arr_all))`.
+- Δdays = `(end_date − start_date).days` — должен быть согласован с `validate_outputs._validate_dates` без изменения `validate_outputs`.
+- Axes canon `(n_lat, n_lon, n_days)` по DT-12-1 не затрагивается.
+
+#### 1.4 DoD сессии 13
+
+1. `start`/`end` в `collect_wave_data` вычисляются по объединённому `time_arr` всех `.nc`.
+2. `TemporalValidationError "Wave horizon looks suspicious: 0 day(s)"` не воспроизводится на dry-run 20260415.
+3. 3-tier discovery DT-11-1 не регрессировал (`CMEMS count=2` для 20260415).
+4. Axes canon DT-12-1 не регрессировал (`Hwave=(73,109,40)`, `mask=(73,109)`).
+5. `validate_outputs.assert_valid_for_bulletin(strict=True)` проходит без исключений.
+6. Целевые тесты зелёные; полный pytest — только DT-08-5 flaky.
+7. Stretch: `.docx` сгенерирован (путь фиксируется в отчёте).
+
+#### 1.5 Git policy сессии 13
+
+- Cursor коммитит код ЛОКАЛЬНО поверх `a34399c`, НЕ пушит.
+- Windsurf в шаге 13.A делает docs-коммит и пушит сразу.
+- Windsurf в шаге 13.C делает финальный docs-коммит и единый push всех локальных код-коммитов — ТОЛЬКО по явной команде пользователя.
+- `--force`, `--force-with-lease`, rebase публичной ветки — ЗАПРЕЩЕНЫ.
+
+#### 1.6 Режим X
+
+Deferred без изменений. В сессии 13 попутных deferred не брать автоматически; любое включение — только по явной команде пользователя, фиксируется отдельной строкой в DoD.
+
+#### 1.7 Обновлено в docs (шаг 13.A)
+
+- `project_context.md` раздел 5: добавлен bullet «Временно́й контракт wave-данных в collect_wave_data» (DT-12-2, Вариант 1, нормативная формула min/max time_arr_all).
+- `project_progress.md`: DT-12-2 переведён в ready-for-implementation (Вариант 1 выбран, explicit non-cause DT-12-1, DoD пункты 1–7, Вариант 2 как резервный, Вариант 3 вне сессии 13).
+- `project_progress.md`: Сессия 13 план расширен (git policy, Режим X, DoD, dry-run эталон, stretch-goal).
+- `conversation_history.md`: текущая секция.
+
+#### 1.8 Следующий шаг — 13.B (Cursor)
+
+**Задача Cursor (шаг 13.B):**
+- Фикс DT-12-2 по Варианту 1 в `utils/collect_wave_data.py`: заменить логику `start_date`/`end_date` на `min`/`max` по `time_arr_all`.
+- Добавить unit-тест для новой логики дат.
+- Dry-run: `py forecast_morning.py --date 20260415` — должен проходить `validate_outputs.assert_valid_for_bulletin(strict=True)`.
+- Зафиксировать результат локально (НЕ пушить).
+- Если после Варианта 1 остаётся strict-блокер по NaN — НЕ переключаться самостоятельно на Вариант 2; вместо этого подготовить формулировку DT-13-1 для шага 13.C.
+
+**Строгие ограничения для Cursor:**
+- `validate_outputs.py` — НЕ трогать.
+- Ingestion-слой — НЕ расширять.
+- 3-tier discovery (`_discover_cmems_nc_files`) — НЕ ломать.
+- Axes canon `(n_lat, n_lon, n_days)` — НЕ нарушать.
+- Dry-run дата: строго `20260415`.
