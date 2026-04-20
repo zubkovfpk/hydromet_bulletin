@@ -8,11 +8,13 @@ The module validates outputs of:
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Any
 
 import numpy as np
 
+logger = logging.getLogger(__name__)
 
 class ValidationError(Exception):
     """Base class for validation failures."""
@@ -130,19 +132,46 @@ def _warn_uniform_field(report: dict[str, Any], arr: np.ndarray, path: str) -> N
         _add_warning(report, "uniform_field", "Field appears fully uniform.", path)
 
 
-def _validate_dates(report: dict[str, Any], start_date: Any, end_date: Any, strict: bool) -> None:
+def _validate_dates(
+    report: dict[str, Any],
+    start_date: Any,
+    end_date: Any,
+    strict: bool,
+    forecast_hours: int | None,
+    tol_hours: int = 0,
+) -> None:
     if not isinstance(start_date, datetime) or not isinstance(end_date, datetime):
         _add_error(report, "invalid_date_type", "start_date and end_date must be datetime.", "wave_data")
         return
 
+    if forecast_hours is None:
+        _add_error(
+            report,
+            "missing_forecast_hours",
+            "forecast_hours must be provided explicitly for wave temporal validation.",
+            "wave_data",
+        )
+        return
+
     report["stats"]["date_start"] = start_date.isoformat()
     report["stats"]["date_end"] = end_date.isoformat()
-    delta_days = (end_date - start_date).days
+    horizon_hours_actual = (end_date - start_date).total_seconds() / 3600.0
+    logger.info(
+        "Wave horizon check: start=%s end=%s actual=%.1fh expected=%dh tolerance=%dh",
+        start_date.isoformat(),
+        end_date.isoformat(),
+        horizon_hours_actual,
+        forecast_hours,
+        tol_hours,
+    )
     if end_date < start_date:
         _add_error(report, "invalid_date_range", "start_date is after end_date.", "wave_data")
-    elif delta_days < 4 or delta_days > 6:
+    elif horizon_hours_actual < (float(forecast_hours) - float(tol_hours)):
         code = "suspicious_horizon"
-        msg = f"Wave horizon looks suspicious: {delta_days} day(s)."
+        msg = (
+            f"Wave horizon looks suspicious: {horizon_hours_actual:.1f}h < expected "
+            f"{forecast_hours}h (tolerance {tol_hours}h)."
+        )
         if strict:
             _add_error(report, code, msg, "wave_data")
         else:
@@ -213,7 +242,15 @@ def validate_meteo_output(data: Any, *, strict: bool = True) -> dict[str, Any]:
     return report
 
 
-def validate_wave_output(wave: Any, start_date: Any, end_date: Any, *, strict: bool = True) -> dict[str, Any]:
+def validate_wave_output(
+    wave: Any,
+    start_date: Any,
+    end_date: Any,
+    *,
+    strict: bool = True,
+    forecast_hours: int | None = None,
+    tol_hours: int = 0,
+) -> dict[str, Any]:
     """
     Validate processed wave output from collect_wave_data().
 
@@ -225,7 +262,7 @@ def validate_wave_output(wave: Any, start_date: Any, end_date: Any, *, strict: b
         return report
 
     report["stats"]["time_steps"] = int(arr.shape[2])
-    _validate_dates(report, start_date, end_date, strict)
+    _validate_dates(report, start_date, end_date, strict, forecast_hours, tol_hours)
 
     if arr.shape[2] != 5:
         _add_error(report, "invalid_time_depth", f"Expected wave time-depth 5, got {arr.shape[2]}.", "wave")
@@ -249,7 +286,12 @@ def validate_wave_output(wave: Any, start_date: Any, end_date: Any, *, strict: b
 
 
 def validate_pipeline_outputs(
-    *, meteo_data: Any = None, wave_data: Any = None, strict: bool = True
+    *,
+    meteo_data: Any = None,
+    wave_data: Any = None,
+    strict: bool = True,
+    forecast_hours: int | None = None,
+    tol_hours: int = 0,
 ) -> dict[str, Any]:
     """
     Validate meteo and/or wave outputs and return one combined report.
@@ -282,7 +324,14 @@ def validate_pipeline_outputs(
             )
         else:
             wave, start_date, end_date = wave_data
-            wave_report = validate_wave_output(wave, start_date, end_date, strict=strict)
+            wave_report = validate_wave_output(
+                wave,
+                start_date,
+                end_date,
+                strict=strict,
+                forecast_hours=forecast_hours,
+                tol_hours=tol_hours,
+            )
             pipeline["errors"].extend(wave_report["errors"])
             pipeline["warnings"].extend(wave_report["warnings"])
             pipeline["stats"]["date_start"] = wave_report["stats"].get("date_start")
@@ -297,18 +346,29 @@ def validate_pipeline_outputs(
 
 
 def assert_valid_for_bulletin(
-    *, meteo_data: Any = None, wave_data: Any = None, strict: bool = True
+    *,
+    meteo_data: Any = None,
+    wave_data: Any = None,
+    strict: bool = True,
+    forecast_hours: int | None = None,
+    tol_hours: int = 0,
 ) -> None:
     """
     Raise ValidationError subclass when critical validation errors are found.
     """
-    report = validate_pipeline_outputs(meteo_data=meteo_data, wave_data=wave_data, strict=strict)
+    report = validate_pipeline_outputs(
+        meteo_data=meteo_data,
+        wave_data=wave_data,
+        strict=strict,
+        forecast_hours=forecast_hours,
+        tol_hours=tol_hours,
+    )
     if report["ok"]:
         return
 
     codes = {item["code"] for item in report["errors"]}
     summary = summarize_validation(report)
-    if {"invalid_date_type", "invalid_date_range", "suspicious_horizon"} & codes:
+    if {"invalid_date_type", "invalid_date_range", "suspicious_horizon", "missing_forecast_hours"} & codes:
         raise TemporalValidationError(summary)
     if {"invalid_ndim", "empty_axis", "spatial_mismatch", "invalid_time_depth"} & codes:
         raise ShapeValidationError(summary)

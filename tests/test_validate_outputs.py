@@ -48,7 +48,7 @@ def test_validate_meteo_output_valid():
 
 def test_validate_wave_output_valid():
     wave, start, end = _make_valid_wave()
-    report = validate_wave_output(wave, start, end, strict=True)
+    report = validate_wave_output(wave, start, end, strict=True, forecast_hours=120)
     assert report["ok"] is True
     assert report["dataset"] == "wave"
     assert report["errors"] == []
@@ -78,7 +78,7 @@ def test_validate_meteo_inconsistent_shapes():
 
 def test_validate_wave_invalid_date_range():
     wave, start, end = _make_valid_wave()
-    report = validate_wave_output(wave, end, start, strict=True)
+    report = validate_wave_output(wave, end, start, strict=True, forecast_hours=120)
     assert report["ok"] is False
     assert any(issue["code"] == "invalid_date_range" for issue in report["errors"])
 
@@ -102,7 +102,7 @@ def test_validate_detects_inf_values():
 def test_validate_detects_zero_filled_wave_layer():
     wave, start, end = _make_valid_wave()
     wave[:, :, 2] = 0.0
-    report = validate_wave_output(wave, start, end, strict=False)
+    report = validate_wave_output(wave, start, end, strict=False, forecast_hours=120)
     assert any(issue["code"] == "zero_filled_layer" for issue in report["warnings"])
 
 
@@ -125,7 +125,7 @@ def test_assert_valid_for_bulletin_raises_on_critical_errors():
 def test_assert_valid_for_bulletin_raises_temporal_error():
     wave, start, end = _make_valid_wave()
     with pytest.raises(TemporalValidationError):
-        assert_valid_for_bulletin(wave_data=(wave, end, start), strict=True)
+        assert_valid_for_bulletin(wave_data=(wave, end, start), strict=True, forecast_hours=120)
 
 
 def test_assert_valid_for_bulletin_raises_shape_error():
@@ -139,4 +139,29 @@ def test_assert_valid_for_bulletin_raises_data_quality_error():
     wave, start, end = _make_valid_wave()
     wave[:, :, 0] = np.nan
     with pytest.raises(DataQualityValidationError):
-        assert_valid_for_bulletin(wave_data=(wave, start, end), strict=True)
+        assert_valid_for_bulletin(wave_data=(wave, start, end), strict=True, forecast_hours=120)
+
+
+def test_validate_wave_horizon_hours_fails_when_21h_lt_24h():
+    wave = np.full((3, 4, 5), 1.2)
+    start = datetime(2026, 4, 19, 3, 0, 0)
+    end = datetime(2026, 4, 20, 0, 0, 0)
+    report = validate_wave_output(wave, start, end, strict=True, forecast_hours=24, tol_hours=0)
+    assert report["ok"] is False
+    assert any(issue["code"] == "suspicious_horizon" for issue in report["errors"])
+
+
+def test_validate_wave_horizon_hours_passes_when_24h_eq_24h():
+    wave = np.full((3, 4, 5), 1.2)
+    start = datetime(2026, 4, 19, 3, 0, 0)
+    end = datetime(2026, 4, 20, 3, 0, 0)
+    report = validate_wave_output(wave, start, end, strict=True, forecast_hours=24, tol_hours=0)
+    assert report["ok"] is True
+
+
+def test_validate_wave_horizon_hours_passes_120h():
+    wave = np.full((3, 4, 5), 1.2)
+    start = datetime(2026, 4, 19, 0, 0, 0)
+    end = datetime(2026, 4, 24, 0, 0, 0)
+    report = validate_wave_output(wave, start, end, strict=True, forecast_hours=120, tol_hours=0)
+    assert report["ok"] is True
