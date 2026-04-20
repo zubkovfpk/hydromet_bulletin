@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from utils.collect_wave_data import _discover_cmems_nc_files
+from utils.collect_wave_data import _derive_time_bounds, _discover_cmems_nc_files, _hours_to_date
 
 
 def test_wave_mask_meshgrid_lat_lon_broadcast_matches_meteo_canon():
@@ -31,4 +31,22 @@ def test_discover_cmems_empty_lists_tried_dt11_regression(tmp_path):
     assert _files == []
     assert any("nested glob" in t for t in tried)
     assert any("flat dated" in t for t in tried)
+
+
+def test_derive_time_bounds_uses_union_across_all_files_dt12_2():
+    """
+    DT-12-2 regression: bounds must come from union of all file time arrays,
+    not from a single file time_arr[0].
+    """
+    # Synthetic CMEMS hours since 1950-01-01:
+    # first file starts at 00:00, second file starts at 12:00 same day.
+    arr_00 = np.array([665760.0, 665763.0, 665766.0])  # 2026-04-15 00/03/06
+    arr_12 = np.array([665772.0, 665800.0, 665880.0])  # includes +5 day horizon point
+
+    start_date, end_date = _derive_time_bounds([arr_00, arr_12])
+
+    assert start_date == _hours_to_date(float(np.min(arr_00)))
+    assert end_date == _hours_to_date(float(np.max(arr_12)))
+    assert end_date > start_date
+    assert (end_date - start_date).days > 0
 

@@ -28,6 +28,23 @@ def _hours_to_date(hours: float) -> datetime:
     return CMEMS_EPOCH + timedelta(hours=float(hours))
 
 
+def _derive_time_bounds(time_arrays: list[np.ndarray]) -> tuple[datetime, datetime]:
+    """
+    Derive global time bounds from all CMEMS files.
+
+    Uses union of all time values (duplicates allowed in source, ignored here).
+    """
+    if not time_arrays:
+        raise ValueError("CMEMS time arrays are empty.")
+
+    all_hours = np.concatenate([np.asarray(arr).ravel() for arr in time_arrays])
+    if all_hours.size == 0:
+        raise ValueError("CMEMS time arrays contain no values.")
+
+    uniq_hours = np.unique(all_hours)
+    return _hours_to_date(float(np.min(uniq_hours))), _hours_to_date(float(np.max(uniq_hours)))
+
+
 def _build_mask(lon_grid: np.ndarray, lat_grid: np.ndarray,
                 shapefile_path: str) -> np.ndarray:
     shp_path = Path(shapefile_path)
@@ -184,28 +201,35 @@ def collect_wave_data(
         ny_full = len(lat_full)
 
     H_Wave = np.zeros((ny_full, nx_full, 40))
-    start_date = end_date = None
-    i, j = 3, 6  # индексы слоёв (0-based: 3:7 = шаги 4-7)
+    all_time_arrays: list[np.ndarray] = []
+    i = 3  # индексы слоёв (0-based: 3:7 = шаги 4-7)
 
     for idx, nc_file in enumerate(nc_files):
         with nc.Dataset(nc_file) as ds:
             hw = np.asarray(ds.variables["VHM0_WW"][:])  # (time, lat, lon)
-            time_arr = ds.variables["time"][:].data
+            time_arr = np.asarray(ds.variables["time"][:].data)
+            all_time_arrays.append(time_arr)
 
             if idx == 0:
                 for k in range(3):
                     H_Wave[:, :, k] = hw[k + 1, :, :]
-                start_date = _hours_to_date(time_arr[0])
             elif idx == len(nc_files) - 1:
                 H_Wave[:, :, 39] = hw[0, :, :]
-                end_date = _hours_to_date(time_arr[0])
             else:
                 end_idx = min(i + 4, 40)
                 take = end_idx - i
                 for k in range(take):
                     H_Wave[:, :, i + k] = hw[k, :, :]
                 i += 4
-                j += 4
+
+    start_date, end_date = _derive_time_bounds(all_time_arrays)
+    logger.info(
+        "CMEMS time bounds: files=%d, start=%s, end=%s, delta_days=%d",
+        len(nc_files),
+        start_date.isoformat(),
+        end_date.isoformat(),
+        (end_date - start_date).days,
+    )
 
     # Обрезка по области Каспия (ось 0 = lat, ось 1 = lon)
     lon_mask = (lon_full >= lon_bounds[0]) & (lon_full <= lon_bounds[1])
