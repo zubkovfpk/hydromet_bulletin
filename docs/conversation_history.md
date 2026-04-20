@@ -2170,3 +2170,105 @@ Deferred без изменений. В сессии 13 попутных deferred
 - 3-tier discovery (`_discover_cmems_nc_files`) — НЕ ломать.
 - Axes canon `(n_lat, n_lon, n_days)` — НЕ нарушать.
 - Dry-run дата: строго `20260415`.
+
+---
+
+### 2. Шаг 13.A.2 — re-scope DT-12-2 и DT-13-1 после уточнений CMEMS-семантики и dry-run policy
+
+**Цель шага:** зафиксировать нормативные уточнения от пользователя, пересмотреть структуру DT-12-2 (Part 1/2), ликвидировать Вариант 3, ввести DT-13-1 и DT-13-2, обновить DoD и git policy сессии 13. Режим: docs-only.
+
+#### 2.1 Точка старта
+
+- origin HEAD = `cc96416` (docs-коммит шага 13.A).
+- Локальный код-коммит `fffc359` (DT-12-2 Part 1, не запушен).
+- Результаты dry-run 13.B на `20260415` — признаны НЕ верификационными (дата зафиксирована по ошибке в 13.A).
+
+#### 2.2 Причина re-scope
+
+Два независимых уточнения от пользователя:
+
+1. **Dry-run date policy:** нормативная дата = today (UTC); fallback = today-1. Фиксация `20260415` в промптах — voluntary reference, не эталон.
+2. **CMEMS forecast semantics (7 пунктов нормативных):**
+   - Именование файлов: `mfwamglocep_<forecast_dt>_R<run_dt>_00H.nc`; источник времени — переменная `time` в `.nc`, не имя файла.
+   - Forecast structure: 1 сутки = 8 отсечек × 3 ч = 2 файла × 12 ч; часы запуска (00/12) не входят в файл; перекрытий нет; иерархии нет.
+   - Forecast horizon: ~10 суток; `collect_wave_data` выбирает ближайшие файлы к `run_datetime`; «догрузка» неприменима.
+   - Time source of truth: только переменная `time` в `.nc`.
+   - Параметр горизонта: `forecast_hours` в `[CMEMS_FORECAST]`, единица — часы, дефолт 120; compat-window β; CLI `--forecast-hours`.
+   - Validation semantics: `(end − start).total_seconds() / 3600` vs `forecast_hours`; `.days` запрещено.
+
+Следствие: Вариант 3 DT-12-2 («догрузка CMEMS») был построен на неверной предпосылке и подлежит отмене.
+
+#### 2.3 Пересмотренная структура DT-12-2
+
+| Part | Статус | SHA | Содержание |
+|------|--------|-----|------------|
+| Part 1 | ✅ closed | fffc359 (local) | min/max по union(time_arr) в `collect_wave_data` |
+| Part 2 | ⚠️ open | 13.B | `_validate_dates` → часы vs `forecast_hours` |
+
+**Explicit non-cause (расширено):**
+- (a) DT-12-1 (axes canon) — не root cause.
+- (b) «subdaily coverage» и «недостаточно CMEMS файлов» — опровергнуто: CMEMS нормативно возвращает 4 отсечки × 12 ч × 2 файла/сутки.
+
+#### 2.4 Ликвидация Варианта 3
+
+**Вариант 3** (догрузка полного набора CMEMS) — **rescinded (13.A.2)**: CMEMS нормативно возвращает штатный набор, «догрузка» неприменима. В истории плана зафиксировано явно.
+
+#### 2.5 Отмена прежней формулировки DT-13-1 (от Cursor, 13.B)
+
+Прежняя формулировка DT-13-1 (Cursor, шаг 13.B) как «data coverage issue» — **superseded by re-scope 13.A.2**: построена на неверной root cause. Актуальная формулировка DT-13-1 — миграция `forecast_days` → `forecast_hours` (compat-window β).
+
+#### 2.6 Новые DT-записи
+
+**DT-13-1** (ready-for-implementation, 13.B): `forecast_days` → `forecast_hours` migration (compat-window β). Scope: `forecast_hours` в `[CMEMS_FORECAST]`, дефолт 120; compat `forecast_days × 24` с deprecation warning; CLI `--forecast-hours`; `config.ini`/`config.example.ini` → 120. Non-scope 13.B: удаление `forecast_days`.
+
+**DT-13-2** (ready-for-implementation, 13.B): dry-run date policy enforcement. Дефолт `--date` = today (UTC); fallback today-1 с логом; явный `--date YYYYMMDD` сохраняется.
+
+#### 2.7 Обновлённый DoD сессии 13
+
+(a) Part 2 DT-12-2: `_validate_dates` сравнивает `(end − start).total_seconds() / 3600` vs `forecast_hours`; strict-проход на dry-run today/today-1.
+(b) DT-13-1: `forecast_hours` действующий ключ; compat-window β; CLI-флаг `--forecast-hours`; конфиги согласованы на 120.
+(c) 3-tier discovery DT-11-1 не регрессировал.
+(d) Wave axes canon DT-12-1 не регрессировал.
+(e) `fffc359` (Part 1) не тронут.
+(f) Целевые pytest зелёные; полный pytest — только DT-08-5 known flaky.
+(g) Stretch: `.docx` сгенерирован на dry-run today/today-1.
+
+Частичный DoD допустим: если Part 2 реализован, но `.docx` не сгенерирован по причине вне scope — фиксируется новым DT.
+
+#### 2.8 Git policy сессии 13 (подтверждена)
+
+- Cursor коммитит код ЛОКАЛЬНО поверх `cc96416` и `fffc359`, НЕ пушит.
+- Windsurf в 13.A.2 делает docs-коммит и пушит сразу (текущий шаг).
+- Windsurf в 13.C: финальный docs-коммит + единый push всех локальных код-коммитов — ТОЛЬКО по явной команде пользователя.
+- `--force`, `--force-with-lease`, rebase публичной ветки — ЗАПРЕЩЕНЫ.
+
+#### 2.9 Режим X (подтверждён)
+
+Deferred без изменений: DT-10-5, DT-10-6, DT-08-5, DT-07-1, DT-08-1..4,6,7. Попутных deferred в сессии 13 не брать автоматически.
+
+#### 2.10 Обновлено в docs (шаг 13.A.2)
+
+- `project_context.md` раздел 5: обновлён temporal contract (Part 1/2); добавлены 7 нормативных bullet: CMEMS file naming, CMEMS forecast structure, CMEMS forecast horizon, time source of truth, dry-run date policy, forecast_hours parameter (DT-13-1), validation horizon semantics (DT-12-2 Part 2).
+- `project_context.md` разделы 9 и 11.3: DT-12-2 → IN PROGRESS Part 1/2; добавлены DT-13-1, DT-13-2.
+- `project_progress.md`: DT-12-2 row — state → IN PROGRESS; title → canonical; explicit non-cause расширен; Part 1/2 структура; Вариант 2 → main path Part 2; Вариант 3 → rescinded; DoD → (a)–(g) с DT-13-1, DT-13-2.
+- `project_progress.md`: добавлены строки DT-13-1 и DT-13-2 в таблицу.
+- `project_progress.md`: секция «Сессия 13 план» обновлена (critical path, variants, dry-run policy, git policy cc96416+fffc359, DoD ref).
+- `conversation_history.md`: текущая секция.
+
+#### 2.11 Следующий шаг — 13.B (Cursor)
+
+**Задача Cursor (шаг 13.B):**
+1. **DT-12-2 Part 2** в `utils/validate_outputs.py`: уйти от `.days` в `_validate_dates`; сравнение `(end − start).total_seconds() / 3600` vs `forecast_hours` из конфига; конкретная формула допуска (==, >=, ±N ч) — на усмотрение реализатора с обоснованием.
+2. **DT-13-1** (compat-window β): добавить `forecast_hours` в `[CMEMS_FORECAST]` в `config.example.ini` (дефолт 120); привести `config.ini` к 120; в коде — читать `forecast_hours`, fallback на `forecast_days × 24` с deprecation warning; CLI `--forecast-hours` у `forecast_morning.py` и `forecast_evening.py`; CLI override над config.
+3. **DT-13-2**: дефолт `--date` = today (UTC); fallback today-1 с явным логом.
+4. Dry-run: `py forecast_morning.py` (без `--date` или с today/today-1) — должен проходить `validate_outputs.assert_valid_for_bulletin(strict=True)`.
+5. Зафиксировать результат ЛОКАЛЬНО, НЕ пушить.
+
+**Строгие ограничения для Cursor:**
+- Не ломать 3-tier discovery (`_discover_cmems_nc_files`).
+- Не ломать axes canon `(n_lat, n_lon, n_days)`.
+- Не менять сигнатуру `collect_wave_data`.
+- Не вводить новых `transpose`/`ix_`.
+- Не удалять `forecast_days` в 13.B (только deprecated fallback).
+- `fffc359` (Part 1) — не трогать (не amend, не rebase).
+- Если после Part 2 + DT-13-1 остаётся strict-блокер — подготовить формулировку нового DT для шага 13.C, не расширять scope самостоятельно.
