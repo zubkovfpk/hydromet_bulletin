@@ -26,7 +26,7 @@ from utils import (
 )
 from utils.collect_wave_data import _discover_cmems_nc_files
 from utils.downloaders.cmems_downloader import resolve_cmems_forecast_hours
-from utils.validate_outputs import assert_valid_for_bulletin
+from utils.validate_outputs import NOMINAL_TOL_HOURS, assert_valid_for_bulletin
 
 # ── Логирование ──────────────────────────────────────────────────────────────
 logger = logging.getLogger(__name__)
@@ -160,6 +160,7 @@ def run_evening(cfg: configparser.ConfigParser,
             wave_data=(HWave, start_date, end_date),
             strict=True,
             forecast_hours=effective_forecast_hours,
+            tol_hours=NOMINAL_TOL_HOURS,
         )
 
         # ── 2. Формирование контента ──────────────────────────────────────

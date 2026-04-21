@@ -16,6 +16,11 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+NOMINAL_TOL_HOURS: int = 3
+# Нормативный tolerance валидации горизонта прогноза в часах
+# (см. docs/project_context.md — Validation horizon semantics).
+# Не менять без обновления docs.
+
 class ValidationError(Exception):
     """Base class for validation failures."""
 

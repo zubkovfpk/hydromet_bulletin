@@ -25,7 +25,7 @@ from utils import (
     create_bulletin_doc,
     send_bulletin,
 )
-from utils.validate_outputs import assert_valid_for_bulletin
+from utils.validate_outputs import NOMINAL_TOL_HOURS, assert_valid_for_bulletin
 
 # ── Логирование ──────────────────────────────────────────────────────────────
 logger = logging.getLogger(__name__)
@@ -164,6 +164,7 @@ def run_morning(cfg: configparser.ConfigParser,
             wave_data=(HWave, start_date, end_date),
             strict=True,
             forecast_hours=effective_forecast_hours,
+            tol_hours=NOMINAL_TOL_HOURS,
         )
 
         # ── 2. Формирование контента ──────────────────────────────────────
