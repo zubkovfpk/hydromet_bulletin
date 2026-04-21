@@ -20,6 +20,10 @@ NOMINAL_TOL_HOURS: int = 3
 # Нормативный tolerance валидации горизонта прогноза в часах
 # (см. docs/project_context.md — Validation horizon semantics).
 # Не менять без обновления docs.
+NOMINAL_WAVE_DAILY_SPAN_HOURS: int = 24
+# Нормативная суточная полнота CMEMS wave-блока в часах (8 отсечек × 3h,
+# без часа запуска модели). См. docs/project_context.md — CMEMS wave
+# temporal contract (session 13). Не менять без обновления docs.
 
 class ValidationError(Exception):
     """Base class for validation failures."""
@@ -149,33 +153,25 @@ def _validate_dates(
         _add_error(report, "invalid_date_type", "start_date and end_date must be datetime.", "wave_data")
         return
 
-    if forecast_hours is None:
-        _add_error(
-            report,
-            "missing_forecast_hours",
-            "forecast_hours must be provided explicitly for wave temporal validation.",
-            "wave_data",
-        )
-        return
-
     report["stats"]["date_start"] = start_date.isoformat()
     report["stats"]["date_end"] = end_date.isoformat()
     horizon_hours_actual = (end_date - start_date).total_seconds() / 3600.0
     logger.info(
-        "Wave horizon check: start=%s end=%s actual=%.1fh expected=%dh tolerance=%dh",
+        "Wave daily-span check: start=%s end=%s actual=%.1fh expected=%dh tolerance=%dh",
         start_date.isoformat(),
         end_date.isoformat(),
         horizon_hours_actual,
-        forecast_hours,
+        NOMINAL_WAVE_DAILY_SPAN_HOURS,
         tol_hours,
     )
     if end_date < start_date:
         _add_error(report, "invalid_date_range", "start_date is after end_date.", "wave_data")
-    elif horizon_hours_actual < (float(forecast_hours) - float(tol_hours)):
-        code = "suspicious_horizon"
+    elif horizon_hours_actual < (float(NOMINAL_WAVE_DAILY_SPAN_HOURS) - float(tol_hours)):
+        code = "wave_daily_span_incomplete"
         msg = (
-            f"Wave horizon looks suspicious: {horizon_hours_actual:.1f}h < expected "
-            f"{forecast_hours}h (tolerance {tol_hours}h)."
+            f"Wave daily span incomplete: {horizon_hours_actual:.1f}h < expected "
+            f"{NOMINAL_WAVE_DAILY_SPAN_HOURS}h (tolerance {tol_hours}h). "
+            "Check CMEMS ingestion for run_date in this bulletin."
         )
         if strict:
             _add_error(report, code, msg, "wave_data")
@@ -373,7 +369,7 @@ def assert_valid_for_bulletin(
 
     codes = {item["code"] for item in report["errors"]}
     summary = summarize_validation(report)
-    if {"invalid_date_type", "invalid_date_range", "suspicious_horizon", "missing_forecast_hours"} & codes:
+    if {"invalid_date_type", "invalid_date_range", "suspicious_horizon", "missing_forecast_hours", "wave_daily_span_incomplete"} & codes:
         raise TemporalValidationError(summary)
     if {"invalid_ndim", "empty_axis", "spatial_mismatch", "invalid_time_depth"} & codes:
         raise ShapeValidationError(summary)

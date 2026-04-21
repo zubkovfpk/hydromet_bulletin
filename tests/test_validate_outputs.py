@@ -148,7 +148,7 @@ def test_validate_wave_horizon_hours_fails_when_21h_lt_24h():
     end = datetime(2026, 4, 20, 0, 0, 0)
     report = validate_wave_output(wave, start, end, strict=True, forecast_hours=24, tol_hours=0)
     assert report["ok"] is False
-    assert any(issue["code"] == "suspicious_horizon" for issue in report["errors"])
+    assert any(issue["code"] == "wave_daily_span_incomplete" for issue in report["errors"])
 
 
 def test_validate_wave_horizon_hours_passes_when_24h_eq_24h():
@@ -159,9 +159,18 @@ def test_validate_wave_horizon_hours_passes_when_24h_eq_24h():
     assert report["ok"] is True
 
 
-def test_validate_wave_horizon_hours_passes_120h():
+def test_validate_wave_daily_span_ok_with_nominal_tolerance_21h():
+    wave = np.full((3, 4, 5), 1.2)
+    start = datetime(2026, 4, 19, 3, 0, 0)
+    end = datetime(2026, 4, 20, 0, 0, 0)
+    report = validate_wave_output(wave, start, end, strict=True, forecast_hours=120, tol_hours=3)
+    assert report["ok"] is True
+
+
+def test_validate_wave_daily_span_incomplete_10h():
     wave = np.full((3, 4, 5), 1.2)
     start = datetime(2026, 4, 19, 0, 0, 0)
-    end = datetime(2026, 4, 24, 0, 0, 0)
-    report = validate_wave_output(wave, start, end, strict=True, forecast_hours=120, tol_hours=0)
-    assert report["ok"] is True
+    end = datetime(2026, 4, 19, 10, 0, 0)
+    report = validate_wave_output(wave, start, end, strict=True, forecast_hours=120, tol_hours=3)
+    assert report["ok"] is False
+    assert any(issue["code"] == "wave_daily_span_incomplete" for issue in report["errors"])
