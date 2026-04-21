@@ -19,6 +19,9 @@ from shapely.geometry import Point
 
 logger = logging.getLogger(__name__)
 
+_LEGACY_WAVES_DIR = "waves"
+_LEGACY_GFS_RESULTS_SUBDIR = "Meteo_Parser_2026/results"
+
 
 def _build_mask(lon_grid: np.ndarray, lat_grid: np.ndarray,
                 shapefile_path: str) -> np.ndarray:
@@ -100,10 +103,35 @@ def _resolve_shapefile_path(shapefile_dir: str) -> Path:
     return Path(shapefile_dir) / "Kasp_Sea" / "Kasp_Sea.shp"
 
 
+def has_cmems_for_date(base_dir: str, run_date: str, cmems_storage_subdir: str) -> bool:
+    """Return True iff at least one CMEMS .nc exists for run_date."""
+    from utils.collect_wave_data import _discover_cmems_nc_files
+
+    files, _ = _discover_cmems_nc_files(
+        base_dir=base_dir,
+        run_date=run_date,
+        cmems_storage_subdir=cmems_storage_subdir,
+        legacy_waves_dir=_LEGACY_WAVES_DIR,
+    )
+    return bool(files)
+
+
+def has_gfs_for_date(base_dir: str, run_date: str, gfs_storage_subdir: str, gfs_cycle: str) -> bool:
+    """Return True iff at least one GFS .nc exists for run_date/cycle."""
+    data_dir = _resolve_gfs_data_dir(
+        base_dir=base_dir,
+        run_date=run_date,
+        cycle=gfs_cycle,
+        gfs_storage_subdir=gfs_storage_subdir,
+        legacy_results_subdir=_LEGACY_GFS_RESULTS_SUBDIR,
+    )
+    return bool(_discover_gfs_nc_files(data_dir))
+
+
 def collect_meteo_data(
     base_dir: str = ".",
     shapefile_dir: str | None = None,
-    results_subdir: str = "Meteo_Parser_2026/results",
+    results_subdir: str = _LEGACY_GFS_RESULTS_SUBDIR,
     gfs_storage_subdir: str = "data/storage/gfs",
     run_date: str | None = None,
     cycle: str | None = None,

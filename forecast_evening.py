@@ -15,16 +15,15 @@ import numpy as np
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from utils.collect_meteo_data import collect_meteo_data, has_cmems_for_date, has_gfs_for_date
+from utils.collect_wave_data import collect_wave_data
 from utils import (
-    collect_meteo_data,
-    collect_wave_data,
     wind_statistics,
     precip_statistics,
     temp_statistics_evening,
     create_bulletin_doc,
     send_bulletin,
 )
-from utils.collect_wave_data import _discover_cmems_nc_files
 from utils.downloaders.cmems_downloader import resolve_cmems_forecast_hours
 from utils.validate_outputs import NOMINAL_TOL_HOURS, assert_valid_for_bulletin
 
@@ -46,6 +45,8 @@ def _resolve_run_date_for_dry_run(
     explicit_run_date: str | None,
     base_dir: str,
     cmems_storage_subdir: str,
+    gfs_storage_subdir: str,
+    gfs_cycle: str,
 ) -> str:
     if explicit_run_date:
         logger.info("Dry-run run_date=%s (explicit --date, fallback disabled)", explicit_run_date)
@@ -53,28 +54,48 @@ def _resolve_run_date_for_dry_run(
 
     today_utc = datetime.now(timezone.utc).date()
     today_str = today_utc.strftime("%Y%m%d")
-    files_today, _ = _discover_cmems_nc_files(
+    has_cmems_today = has_cmems_for_date(
         base_dir=base_dir,
         run_date=today_str,
         cmems_storage_subdir=cmems_storage_subdir,
-        legacy_waves_dir="waves",
     )
-    if files_today:
+    has_gfs_today = has_gfs_for_date(
+        base_dir=base_dir,
+        run_date=today_str,
+        gfs_storage_subdir=gfs_storage_subdir,
+        gfs_cycle=gfs_cycle,
+    )
+    if has_cmems_today and has_gfs_today:
         logger.info("Dry-run run_date=today=%s (UTC)", today_str)
         return today_str
 
     prev_str = (today_utc - timedelta(days=1)).strftime("%Y%m%d")
-    files_prev, _ = _discover_cmems_nc_files(
+    has_cmems_prev = has_cmems_for_date(
         base_dir=base_dir,
         run_date=prev_str,
         cmems_storage_subdir=cmems_storage_subdir,
-        legacy_waves_dir="waves",
     )
-    if files_prev:
-        logger.info("Dry-run run_date=today-1=%s (UTC) — no CMEMS for today", prev_str)
+    has_gfs_prev = has_gfs_for_date(
+        base_dir=base_dir,
+        run_date=prev_str,
+        gfs_storage_subdir=gfs_storage_subdir,
+        gfs_cycle=gfs_cycle,
+    )
+    if has_cmems_prev and has_gfs_prev:
+        logger.warning(
+            "CMEMS/GFS not both available for %s (cmems=%s, gfs=%s), falling back to %s",
+            today_str,
+            has_cmems_today,
+            has_gfs_today,
+            prev_str,
+        )
         return prev_str
 
-    raise FileNotFoundError("No CMEMS .nc for today UTC nor today-1; check ingestion")
+    raise FileNotFoundError(
+        "No aligned CMEMS+GFS data for today UTC nor today-1. "
+        f"today={today_str}(cmems={has_cmems_today},gfs={has_gfs_today}), "
+        f"today-1={prev_str}(cmems={has_cmems_prev},gfs={has_gfs_prev}); check ingestion."
+    )
 
 
 def _configure_logging(cfg: configparser.ConfigParser) -> None:
@@ -134,6 +155,8 @@ def run_evening(cfg: configparser.ConfigParser,
         explicit_run_date=run_date,
         base_dir=base_dir,
         cmems_storage_subdir=cmems_storage_subdir,
+        gfs_storage_subdir=gfs_storage_subdir,
+        gfs_cycle=gfs_cycle,
     )
 
     try:
