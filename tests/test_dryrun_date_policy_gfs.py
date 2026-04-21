@@ -16,7 +16,14 @@ def _touch(path):
 
 
 def _make_cmems_marker(tmp_path, run_date: str) -> None:
-    _touch(tmp_path / "data" / "storage" / "cmems" / run_date / "marker.nc")
+    _touch(
+        tmp_path
+        / "data"
+        / "storage"
+        / "cmems"
+        / run_date
+        / f"mfwamglocep_{run_date}12_R{run_date}_00H.nc"
+    )
 
 
 def _make_gfs_marker(tmp_path, run_date: str, cycle: str = "00z") -> None:

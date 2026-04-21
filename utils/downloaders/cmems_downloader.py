@@ -7,8 +7,59 @@ import configparser
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable
+
+_EXPLICIT_CMEMS_RUN_PARAMS_MSG = (
+    "explicit run_hour and first_forecast_dt are required until DT-14-Z (scheduled ingestion); "
+    "pass keyword arguments run_hour='00'|'12' and first_forecast_dt='YYYYMMDDHH' (UTC)."
+)
+
+
+def build_cmems_wave_regex(
+    run_date: str,
+    run_hour: str,
+    first_forecast_dt: str,
+    forecast_days: int = 5,
+) -> str:
+    """
+    Return regex matching exactly ``2 * forecast_days`` CMEMS wave files for this run.
+
+    Args:
+        run_date: YYYYMMDD — model run date (UTC).
+        run_hour: "00" or "12" — model run hour (UTC).
+        first_forecast_dt: YYYYMMDDHH — nominal forecast_dt hour of the first file in window.
+            Must be a valid 12h-aligned timestamp (hour in {"00", "12"}).
+        forecast_days: forecast depth in days (default 5 → 10 files × 12h each).
+
+    Returns:
+        Regex string matching absolute paths to exactly ``2 * forecast_days`` files.
+
+    Contract:
+        Output filenames: ``mfwamglocep_<FORECAST_DT>_R<run_date>_<run_hour>H.nc``.
+        FORECAST_DT list: first_forecast_dt, +12h, +24h, ..., +(2*forecast_days - 1)*12h.
+
+    Raises:
+        ValueError: if ``run_hour`` not in {"00", "12"}, or ``first_forecast_dt`` hour not in
+            {"00", "12"}, or ``forecast_days`` <= 0.
+    """
+    if run_hour not in {"00", "12"}:
+        raise ValueError(f"run_hour must be '00' or '12', got {run_hour!r}")
+    if forecast_days <= 0:
+        raise ValueError(f"forecast_days must be positive, got {forecast_days}")
+    if len(first_forecast_dt) < 2 or first_forecast_dt[-2:] not in {"00", "12"}:
+        raise ValueError(
+            f"first_forecast_dt must end with hour 00 or 12 (UTC), got {first_forecast_dt!r}"
+        )
+
+    fdt = datetime.strptime(first_forecast_dt, "%Y%m%d%H")
+    ts_list: list[str] = []
+    for i in range(2 * forecast_days):
+        ts_list.append((fdt + timedelta(hours=12 * i)).strftime("%Y%m%d%H"))
+    assert len(ts_list) == 2 * forecast_days
+    alt = "|".join(ts_list)
+    return rf".*/mfwamglocep_({alt})_R{run_date}_{run_hour}H\.nc$"
 
 
 def resolve_cmems_forecast_hours(
@@ -182,6 +233,9 @@ class CMEMSDownloader:
         password,
         start_datetime,
         end_datetime,
+        *,
+        run_hour: str,
+        first_forecast_dt: str,
     ) -> str:
         """Run primary strategy selected by cmems_download_mode."""
         if self.download_mode == "subset":
@@ -199,13 +253,25 @@ class CMEMSDownloader:
             return "subset"
 
         def _run_get_call() -> None:
+            if self.forecast_hours % 24 != 0:
+                raise ValueError(
+                    f"CMEMS forecast_hours={self.forecast_hours} is not divisible by 24; "
+                    "cannot build per-day regex window."
+                )
+            forecast_days = self.forecast_hours // 24
+            regex = build_cmems_wave_regex(
+                date,
+                run_hour,
+                first_forecast_dt,
+                forecast_days=forecast_days,
+            )
             copernicusmarine.get(
                 dataset_id=self.cmems_dataset,
                 output_directory=self.storage_dir,
                 username=username,
                 password=password,
                 overwrite=self.replace_existing,
-                filter=f"*{date}*",
+                regex=regex,
                 disable_progress_bar=True,
             )
 
@@ -213,7 +279,13 @@ class CMEMSDownloader:
         self.logger.info("CMEMS: copernicusmarine.get completed successfully")
         return "get"
 
-    def download(self, date: str) -> bool:
+    def download(
+        self,
+        date: str,
+        *,
+        run_hour: str | None = None,
+        first_forecast_dt: str | None = None,
+    ) -> bool:
         """Download CMEMS inputs for provided date via Copernicus Marine Toolbox.
 
         Uses ``copernicusmarine.login()`` when username/password are set in config
@@ -221,16 +293,24 @@ class CMEMSDownloader:
         ``copernicusmarine.get()`` resolves credentials from env or stored files.
 
         Temporal window for the run day is derived from ``date`` (UTC) and logged;
-        file selection uses ``get(..., filter=...)`` because the ``get`` API has no
+        file selection uses ``get(..., regex=...)`` because the ``get`` API has no
         ``start_datetime`` / ``end_datetime`` parameters.
 
         Args:
-            date: Run date in YYYYMMDD format.
+            date: Run date in YYYYMMDD format (model run date ``R<date>`` in filenames).
+            run_hour: ``"00"`` or ``"12"`` — model run hour (UTC); required.
+            first_forecast_dt: ``YYYYMMDDHH`` — first forecast slot in the window; required.
 
         Returns:
             bool: True if ``copernicusmarine.get`` completes without raising.
+
+        Raises:
+            ValueError: if ``run_hour`` or ``first_forecast_dt`` is omitted (until DT-14-Z).
         """
         from datetime import datetime, timedelta, timezone
+
+        if run_hour is None or first_forecast_dt is None:
+            raise ValueError(_EXPLICIT_CMEMS_RUN_PARAMS_MSG)
 
         try:
             import copernicusmarine
@@ -238,7 +318,12 @@ class CMEMSDownloader:
             self.logger.exception("CMEMS: copernicusmarine package is not installed")
             return False
 
-        self.logger.info("CMEMS download: start  date=%s", date)
+        self.logger.info(
+            "CMEMS download: start  date=%s run_hour=%s first_forecast_dt=%s",
+            date,
+            run_hour,
+            first_forecast_dt,
+        )
 
         try:
             day = datetime.strptime(date, "%Y%m%d").replace(tzinfo=timezone.utc)
@@ -284,6 +369,8 @@ class CMEMSDownloader:
                     password=password,
                     start_datetime=start_datetime,
                     end_datetime=end_datetime,
+                    run_hour=run_hour,
+                    first_forecast_dt=first_forecast_dt,
                 )
                 return True
             except FuturesTimeoutError:

@@ -116,8 +116,8 @@ def test_discover_cmems_nc_files_nested_copernicus_layout(tmp_path):
         / "04"
     )
     deep.mkdir(parents=True)
-    a = deep / "mfwamglocep_2026041500_R20260414_12H.nc"
-    b = deep / "mfwamglocep_2026041512_R20260414_12H.nc"
+    a = deep / "mfwamglocep_2026041500_R20260415_00H.nc"
+    b = deep / "mfwamglocep_2026041512_R20260415_00H.nc"
     a.write_text("x", encoding="utf-8")
     b.write_text("x", encoding="utf-8")
 
@@ -135,7 +135,7 @@ def test_discover_cmems_nc_files_prefers_flat_dated_dir(tmp_path):
     run_date = "20260415"
     flat = tmp_path / "data" / "storage" / "cmems" / run_date
     flat.mkdir(parents=True)
-    one = flat / "mfwamglocep_2026041500.nc"
+    one = flat / "mfwamglocep_2026041500_R20260415_00H.nc"
     one.write_text("x", encoding="utf-8")
 
     files, _tried = _discover_cmems_nc_files(
@@ -231,7 +231,7 @@ def test_collect_wave_data_raises_file_not_found_for_missing_shapefile(tmp_path)
     run_date = "20260415"
     cmems_dir = tmp_path / "data" / "storage" / "cmems" / run_date
     cmems_dir.mkdir(parents=True)
-    (cmems_dir / "one.nc").write_text("x", encoding="utf-8")
+    (cmems_dir / f"mfwamglocep_{run_date}12_R{run_date}_00H.nc").write_text("x", encoding="utf-8")
 
     shapefile_dir = tmp_path / "data" / "shapefiles"
     shapefile_dir.mkdir(parents=True)

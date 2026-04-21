@@ -54,6 +54,17 @@ def main() -> int:
     parser.add_argument("--config", default="config.ini", help="Path to config.ini")
     parser.add_argument("--date", default=None, help="Run date in YYYYMMDD")
     parser.add_argument("--cycle", default=None, help="GFS cycle (00z/06z/12z/18z)")
+    parser.add_argument(
+        "--cmems-run-hour",
+        default=None,
+        choices=["00", "12"],
+        help="CMEMS model run hour (UTC); required for CMEMS get() regex until DT-14-Z",
+    )
+    parser.add_argument(
+        "--cmems-first-forecast-dt",
+        default=None,
+        help="First forecast slot YYYYMMDDHH (UTC, hour 00 or 12); required with --cmems-run-hour",
+    )
     args = parser.parse_args()
 
     logger = _setup_logging()
@@ -72,7 +83,11 @@ def main() -> int:
         cmems = CMEMSDownloader(cfg, logger=logger)
         gfs = GFSDownloader(cfg, logger=logger)
 
-        cmems_ok = cmems.download(date=run_date)
+        cmems_ok = cmems.download(
+            run_date,
+            run_hour=args.cmems_run_hour,
+            first_forecast_dt=args.cmems_first_forecast_dt,
+        )
         gfs_ok = gfs.download(date=run_date, cycle=gfs_cycle)
 
         if cmems_ok and gfs_ok:

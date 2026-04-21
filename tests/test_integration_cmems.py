@@ -82,13 +82,21 @@ class TestCMEMSIntegration(unittest.TestCase):
     @pytest.mark.integration
     def test_download_returns_true_for_recent_date(self) -> None:
         downloader = CMEMSDownloader(self.cfg, logger=self.logger)
-        result = downloader.download(self.yesterday)
+        result = downloader.download(
+            self.yesterday,
+            run_hour="00",
+            first_forecast_dt=f"{self.yesterday}12",
+        )
         self.assertTrue(result, f"CMEMSDownloader.download({self.yesterday!r}) returned False")
 
     @pytest.mark.integration
     def test_download_creates_nc_files_in_storage_dir(self) -> None:
         downloader = CMEMSDownloader(self.cfg, logger=self.logger)
-        downloader.download(self.yesterday)
+        downloader.download(
+            self.yesterday,
+            run_hour="00",
+            first_forecast_dt=f"{self.yesterday}12",
+        )
         nc_files = list(downloader.storage_dir.rglob("*.nc"))
         self.assertGreater(
             len(nc_files),
@@ -119,7 +127,11 @@ class TestCMEMSIntegration(unittest.TestCase):
         test_logger.addHandler(logging.StreamHandler(sys.stdout))
 
         downloader = CMEMSDownloader(cfg_tight, logger=test_logger)
-        result = downloader.download("20260413")
+        result = downloader.download(
+            "20260413",
+            run_hour="00",
+            first_forecast_dt="2026041312",
+        )
 
         self.assertEqual(result, False, "download() should return False when all retries time out")
 
@@ -176,7 +188,11 @@ class TestCMEMSIntegration(unittest.TestCase):
 
             downloader = CMEMSDownloader(cfg_local, logger=self.logger)
             with patch.dict(sys.modules, {"copernicusmarine": fake_module}):
-                result = downloader.download("20260413")
+                result = downloader.download(
+                    "20260413",
+                    run_hour="00",
+                    first_forecast_dt="2026041312",
+                )
 
             self.assertTrue(result, "download() should succeed via subset() fallback")
             self.assertIn("get", events, "Expected get() to be called before fallback")

@@ -22,6 +22,15 @@ logger = logging.getLogger(__name__)
 
 # Epoch CMEMS: часы с 1950-01-01
 CMEMS_EPOCH = datetime(1950, 1, 1)
+NOMINAL_WAVE_DAYS: int = 5
+CMEMS_WAVE_FILES_PER_RUN: int = 10
+CMEMS_WAVE_TIMESTEPS_PER_FILE: int = 4
+CMEMS_WAVE_TOTAL_TIMESTEPS: int = 40
+CMEMS_WAVE_TIMESTEPS_PER_DAY: int = 8
+CMEMS_WAVE_VAR_NAME: str = "VHM0_WW"
+CMEMS_WAVE_FILL_VALUE: int = -32767
+# Нормативные параметры wave-контракта CMEMS для bulletin generation.
+# См. docs/project_context.md (CMEMS wave temporal contract, session 14).
 
 
 def _hours_to_date(hours: float) -> datetime:
@@ -87,12 +96,12 @@ def _discover_cmems_nc_files(
     """
     Locate CMEMS wave NetCDF files for ``run_date`` (YYYYMMDD).
 
-    Resolution order (DT-11-1):
+    Resolution order (R-label only; no prefix fallback):
 
-    1. **Flat layout** — ``{cmems_root}/{run_date}/*.nc`` (documented new layout).
-    2. **Nested layout** — ``{cmems_root}/**/mfwamglocep_{run_date}*.nc`` (Copernicus
-       toolbox often writes under product/year/month subfolders).
-    3. **Legacy** — ``{base_dir}/{legacy_waves_dir}/*.nc``.
+    1. **Flat layout (R-label)** — ``{cmems_root}/{run_date}/*_R{run_date}_*.nc``.
+    2. **Nested layout (R-label)** — ``{cmems_root}/**/mfwamglocep_*_R{run_date}_*.nc``.
+    3. **Legacy** — ``{base_dir}/{legacy_waves_dir}/*_R{run_date}_*.nc``.
+       Files without ``R{run_date}`` attribution are ignored.
 
     Returns ``(files, tried_descriptions)`` for logging and error diagnostics.
     """
@@ -101,24 +110,25 @@ def _discover_cmems_nc_files(
     tried: list[str] = []
 
     flat_dir = cmems_root / run_date
-    tried.append(f"flat dated dir: {flat_dir}")
+    rlabel_pattern = f"*_R{run_date}_*.nc"
+    tried.append(f"flat dated dir (R-label): {flat_dir}/{rlabel_pattern}")
     if flat_dir.is_dir():
-        direct = sorted(flat_dir.glob("*.nc"))
-        if direct:
-            return direct, tried
+        direct_rlabel = sorted(flat_dir.glob(rlabel_pattern))
+        if direct_rlabel:
+            return direct_rlabel, tried
 
-    nested_pattern = f"mfwamglocep_{run_date}*.nc"
-    tried.append(f"nested glob under {cmems_root}: **/{nested_pattern}")
-    nested = sorted(cmems_root.glob(f"**/{nested_pattern}"))
-    if nested:
-        return nested, tried
+    nested_rlabel_pattern = f"mfwamglocep_*_R{run_date}_*.nc"
+    tried.append(f"nested glob under {cmems_root}: **/{nested_rlabel_pattern}")
+    nested_rlabel = sorted(cmems_root.glob(f"**/{nested_rlabel_pattern}"))
+    if nested_rlabel:
+        return nested_rlabel, tried
 
     legacy_dir = base / legacy_waves_dir
-    tried.append(f"legacy waves dir: {legacy_dir}")
+    tried.append(f"legacy waves dir (R-label): {legacy_dir}/{rlabel_pattern}")
     if legacy_dir.is_dir():
-        legacy_files = sorted(legacy_dir.glob("*.nc"))
-        if legacy_files:
-            return legacy_files, tried
+        legacy_rlabel = sorted(legacy_dir.glob(rlabel_pattern))
+        if legacy_rlabel:
+            return legacy_rlabel, tried
 
     return [], tried
 
@@ -193,34 +203,46 @@ def collect_wave_data(
         raise FileNotFoundError(f"Shapefile not found: {shp_path}")
 
     # Глобальный буфер: (n_lat, n_lon, 40) — каноника lat-first, без 3D transpose от NetCDF
-    # VHM0_WW в CMEMS: (time, latitude, longitude); заполняем H_Wave[t_slot] = hw[t, :, :]
+    # VHM0_WW в CMEMS: (time, latitude, longitude); заполняем H_Wave[:, :, t_slot]
     with nc.Dataset(nc_files[0]) as ds0:
         lon_full = ds0.variables["longitude"][:].data
         lat_full = ds0.variables["latitude"][:].data
         nx_full = len(lon_full)
         ny_full = len(lat_full)
 
-    H_Wave = np.zeros((ny_full, nx_full, 40))
+    H_Wave = np.full((ny_full, nx_full, CMEMS_WAVE_TOTAL_TIMESTEPS), np.nan, dtype=float)
     all_time_arrays: list[np.ndarray] = []
-    i = 3  # индексы слоёв (0-based: 3:7 = шаги 4-7)
 
     for idx, nc_file in enumerate(nc_files):
         with nc.Dataset(nc_file) as ds:
-            hw = np.asarray(ds.variables["VHM0_WW"][:])  # (time, lat, lon)
+            var = ds.variables[CMEMS_WAVE_VAR_NAME]
+            hw_raw = var[:]
+            if np.ma.isMaskedArray(hw_raw):
+                hw = np.ma.filled(hw_raw, np.nan).astype(float)
+            else:
+                hw = np.asarray(hw_raw, dtype=float)
+            fill = getattr(var, "_FillValue", None)
+            if fill is None:
+                fill = getattr(var, "missing_value", None)
+            if fill is not None:
+                hw = np.where(hw == float(fill), np.nan, hw)
+            else:
+                logger.warning(
+                    "CMEMS %s: no _FillValue/missing_value attribute in %s, fill decoding skipped",
+                    CMEMS_WAVE_VAR_NAME,
+                    nc_file,
+                )
             time_arr = np.asarray(ds.variables["time"][:].data)
             all_time_arrays.append(time_arr)
-
-            if idx == 0:
-                for k in range(3):
-                    H_Wave[:, :, k] = hw[k + 1, :, :]
-            elif idx == len(nc_files) - 1:
-                H_Wave[:, :, 39] = hw[0, :, :]
-            else:
-                end_idx = min(i + 4, 40)
-                take = end_idx - i
-                for k in range(take):
-                    H_Wave[:, :, i + k] = hw[k, :, :]
-                i += 4
+            assert hw.shape[0] == CMEMS_WAVE_TIMESTEPS_PER_FILE, (
+                f"Unexpected time length in {nc_file}: got {hw.shape[0]}, "
+                f"expected {CMEMS_WAVE_TIMESTEPS_PER_FILE}"
+            )
+            s = idx * CMEMS_WAVE_TIMESTEPS_PER_FILE
+            e = min(s + CMEMS_WAVE_TIMESTEPS_PER_FILE, CMEMS_WAVE_TOTAL_TIMESTEPS)
+            take = e - s
+            if take > 0:
+                H_Wave[:, :, s:e] = hw[:take, :, :].transpose(1, 2, 0)
 
     start_date, end_date = _derive_time_bounds(all_time_arrays)
     logger.info(
@@ -252,11 +274,11 @@ def collect_wave_data(
     )
 
     # Агрегация: 8 шагов × 3ч = 24ч → 5 суток
-    Wave = np.full((*Hwave.shape[:2], 5), np.nan)
-    for d in range(5):
-        s = d * 8
-        e = s + 8
-        Wave[:, :, d] = np.mean(Hwave[:, :, s:e], axis=2)
+    Wave = np.full((*Hwave.shape[:2], NOMINAL_WAVE_DAYS), np.nan)
+    for d in range(NOMINAL_WAVE_DAYS):
+        s = d * CMEMS_WAVE_TIMESTEPS_PER_DAY
+        e = s + CMEMS_WAVE_TIMESTEPS_PER_DAY
+        Wave[:, :, d] = np.nanmean(Hwave[:, :, s:e], axis=2)
 
     # Применяем маску
     Wave[~np.broadcast_to(mask[:, :, np.newaxis], Wave.shape)] = np.nan
