@@ -213,3 +213,20 @@ pie
 
 **Критический путь сессии 14:** DT-13-3 (date policy GFS) + DT-13-4 (clean migration storage layout).
 **Стартовая микро-задача сессии 14:** реализация tol_hours = 3 в коде (config-ключ или константа).
+
+## Сессия 14 — план
+
+**Цель:** dry-run → `.docx` end-to-end на дате today-1.
+
+- **14.A** pre-work (docs) — текущий коммит.
+- **14.B** tol_hours=3 code finalization (хвост DT-12-2 Part 2).
+  DoD: tol_hours вынесен в именованную константу или config-ключ со значением 3; поведение валидации не меняется vs d377661.
+- **14.C** DT-13-3 — GFS date policy: симметричная проверка GFS storage + fallback today-1.
+  DoD: dry-run без GFS за today корректно откатывается на today-1 и не падает в `collect_meteo_data`.
+- **14.D** DT-13-4 — миграция `results_subdir` с legacy `"Meteo_Parser_2026/results"` на `data/storage/gfs/`-layout.
+  DoD: `collect_meteo_data` ищет входы в новом layout, dry-run находит файлы.
+- **14.E** Windsurf review + единый push по явной команде пользователя.
+
+**Overall DoD S14:** `py forecast_morning.py` проходит полный pipeline → `.docx` на today-1.
+
+**Parking lot S14:** DT-13-6.

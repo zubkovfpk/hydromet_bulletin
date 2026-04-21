@@ -2390,3 +2390,11 @@ Deferred без изменений: DT-10-5, DT-10-6, DT-08-5, DT-07-1, DT-08-1.
 1. **DT-13-3** (HIGH): date policy + GFS availability check.
 2. **DT-13-4** (HIGH, clean migration): legacy `results_subdir` → новый layout.
 3. **Стартовая микро-задача:** код-реализация `tol_hours = 3` (config-ключ `validation_tol_hours` или константа).
+
+---
+
+### Сессия 14, шаг A — pre-work docs (Windsurf)
+
+Session 14 opened. Entry HEAD = `fbda74c` (session 13 closed). Scope: 14.A docs pre-work, 14.B tol_hours code, 14.C DT-13-3, 14.D DT-13-4, 14.E review+push. DoD: dry-run → `.docx` на today-1. DT-13-6 — parking lot.
+
+**14.B verdict (из инспекции d377661):** code-шаг, не no-op. В `validate_outputs.py` дефолт `tol_hours: int = 0`; именованной константы со значением 3 нет. Задача 14.B: вынести 3 в `_NOMINAL_TOL_HOURS` или config-ключ; передавать явно через callers.
