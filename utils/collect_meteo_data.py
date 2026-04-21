@@ -131,7 +131,7 @@ def has_gfs_for_date(base_dir: str, run_date: str, gfs_storage_subdir: str, gfs_
 def collect_meteo_data(
     base_dir: str = ".",
     shapefile_dir: str | None = None,
-    results_subdir: str = _LEGACY_GFS_RESULTS_SUBDIR,
+    results_subdir: str | None = None,
     gfs_storage_subdir: str = "data/storage/gfs",
     run_date: str | None = None,
     cycle: str | None = None,
@@ -143,7 +143,8 @@ def collect_meteo_data(
     ----------
     base_dir        : str  — корневая папка проекта
     shapefile_dir   : str | None — путь к каталогу shapefiles; если None — %(basedir)s/data/shapefiles
-    results_subdir  : str  — legacy путь к папке results относительно base_dir
+    results_subdir  : str | None — legacy путь к папке results относительно base_dir
+                     (если None, используется внутренний legacy fallback)
     gfs_storage_subdir : str — путь к новому GFS storage относительно base_dir
     run_date        : str | None — дата запуска 'YYYYMMDD'; если None — сегодня
     cycle           : str | None — цикл GFS ('00z'/'06z'/'12z'/'18z'), если None — '00z'
@@ -161,13 +162,14 @@ def collect_meteo_data(
         run_date = date.today().strftime("%Y%m%d")
     if shapefile_dir is None:
         shapefile_dir = str(Path(base_dir) / "data" / "shapefiles")
+    legacy_results_subdir = results_subdir or _LEGACY_GFS_RESULTS_SUBDIR
 
     data_dir = _resolve_gfs_data_dir(
         base_dir=base_dir,
         run_date=run_date,
         cycle=cycle,
         gfs_storage_subdir=gfs_storage_subdir,
-        legacy_results_subdir=results_subdir,
+        legacy_results_subdir=legacy_results_subdir,
     )
     nc_files = _discover_gfs_nc_files(data_dir)
     if not nc_files:
