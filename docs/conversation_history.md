@@ -2398,3 +2398,27 @@ Deferred без изменений: DT-10-5, DT-10-6, DT-08-5, DT-07-1, DT-08-1.
 Session 14 opened. Entry HEAD = `fbda74c` (session 13 closed). Scope: 14.A docs pre-work, 14.B tol_hours code, 14.C DT-13-3, 14.D DT-13-4, 14.E review+push. DoD: dry-run → `.docx` на today-1. DT-13-6 — parking lot.
 
 **14.B verdict (из инспекции d377661):** code-шаг, не no-op. В `validate_outputs.py` дефолт `tol_hours: int = 0`; именованной константы со значением 3 нет. Задача 14.B: вынести 3 в `_NOMINAL_TOL_HOURS` или config-ключ; передавать явно через callers.
+
+---
+
+### Сессия 14 — закрытие (Windsurf)
+
+Session 14 closed.
+
+- Entry HEAD = `fbda74c`.
+- Exit HEAD = `cb85068`.
+- Local commits in S14 (ahead vs origin before 14.E push): 7.
+
+**DoD S14 ✅ met:** dry-run → `.docx` end-to-end на `20260421` cycle=`12z` (CMEMS `R20260421`, run hour `12z`). Artefact: `output/Прогноз_утро_20260422.docx` (untracked).
+
+**Commits:**
+
+- `c0639f1` — 14.A docs open session.
+- `104c791` — 14.B tol_hours=3 (`NOMINAL_TOL_HOURS`).
+- `90523af` — 14.C DT-13-3: GFS availability check + fallback today-1.
+- `bd70c79` — 14.D DT-13-4 (meteo-side): `results_subdir` migration + legacy fallback.
+- `fbb2830` — 14.F DT-12-2 Part 3: wave daily span split (24h) vs forecast depth.
+- `6efa10e` — 14.H DT-12-2 Part 4: CMEMS wave contract `R<run_date>` + NaN init + fill-value decode + `nanmean`.
+- `cb85068` — 14.I: statistics imports fix.
+
+**Open DT (parking lot for future sessions):** DT-14-V, DT-14-U, DT-14-T, DT-14-S, DT-14-Y, DT-14-Z.
