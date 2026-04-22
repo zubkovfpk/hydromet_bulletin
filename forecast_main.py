@@ -10,13 +10,17 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 MSK_TZ = ZoneInfo("Europe/Moscow")
 UTC_TZ = timezone.utc
 DEFAULT_TIMEOUT_MINUTES = 360
 DEFAULT_POLLING_MINUTES = 10
+GFS_LAG_HOURS = 6
+CMEMS_LAG_HOURS = 12
+GFS_CYCLES_UTC = (0, 6, 12, 18)
+CMEMS_RELEASE_HOUR_UTC = 12
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +106,50 @@ def msk_to_utc(date_str: str, time_str: str, tz_name: str) -> datetime:
     raise ValueError(f"Unsupported timezone '{tz_name}'. Supported values: MSK, UTC.")
 
 
+def _ensure_utc_aware(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        raise ValueError("request_time_utc must be timezone-aware.")
+    return dt.astimezone(UTC_TZ)
+
+
+def resolve_gfs_cycle(request_time_utc: datetime) -> datetime:
+    """
+    Return timezone-aware UTC datetime of nearest available GFS cycle.
+    """
+    request_utc = _ensure_utc_aware(request_time_utc)
+    effective = request_utc - timedelta(hours=GFS_LAG_HOURS)
+
+    eligible_hours = [h for h in GFS_CYCLES_UTC if h <= effective.hour]
+    if eligible_hours:
+        cycle_hour = max(eligible_hours)
+        cycle_day = effective.date()
+    else:
+        cycle_hour = max(GFS_CYCLES_UTC)
+        cycle_day = effective.date() - timedelta(days=1)
+
+    return datetime(
+        cycle_day.year,
+        cycle_day.month,
+        cycle_day.day,
+        cycle_hour,
+        0,
+        tzinfo=UTC_TZ,
+    )
+
+
+def resolve_cmems_layer(request_time_utc: datetime) -> date:
+    """
+    Return date of available CMEMS daily layer for request time.
+    """
+    request_utc = _ensure_utc_aware(request_time_utc)
+    effective = request_utc - timedelta(hours=CMEMS_LAG_HOURS)
+    release_time = time(CMEMS_RELEASE_HOUR_UTC, 0)
+
+    if effective.time() >= release_time:
+        return effective.date()
+    return effective.date() - timedelta(days=1)
+
+
 def setup_logging(level_name: str) -> None:
     logging.basicConfig(
         level=getattr(logging, level_name, logging.INFO),
@@ -125,6 +173,10 @@ def main(argv: list[str] | None = None) -> int:
             args.dry_run,
         )
         logger.info("Resolved UTC datetime: %s", resolved_utc.isoformat())
+        resolved_gfs_cycle = resolve_gfs_cycle(resolved_utc)
+        resolved_cmems_layer = resolve_cmems_layer(resolved_utc)
+        logger.info("Resolved GFS cycle UTC: %s", resolved_gfs_cycle.isoformat())
+        logger.info("Resolved CMEMS layer date: %s", resolved_cmems_layer.isoformat())
 
         if args.dry_run:
             print("[dry-run] forecast_main resolved parameters:")
@@ -132,6 +184,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  input_time: {args.time}")
             print(f"  input_tz: {args.tz}")
             print(f"  UTC datetime: {resolved_utc.isoformat()}")
+            print(f"  gfs_cycle: {resolved_gfs_cycle.isoformat()}")
+            print(f"  cmems_layer: {resolved_cmems_layer.isoformat()}")
+            print(f"  gfs_lag: {GFS_LAG_HOURS}h")
+            print(f"  cmems_lag: {CMEMS_LAG_HOURS}h")
             print(f"  timeout_minutes: {args.timeout_minutes}")
             print(f"  polling_minutes: {args.polling_minutes}")
             return 0
