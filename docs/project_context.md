@@ -74,6 +74,7 @@ hydromet_bulletin/
      __init__.py
      collect_meteo_data.py      читает GFS NetCDF (*.nc), маскировка по shp, расчёт полей  done
      collect_wave_data.py       разбор CMEMS NetCDF (hs/tp/dp), агрегация           done
+     validate_outputs.py        validation layer (structure/shape/temporal/data-quality) done
      doc_builder.py             конструктор Word-документа (заголовки, стили)       done
      email_sender.py            отправка .docx по SMTP SSL/TLS (порт 465)           done
      precip_statistics.py       статистика осадков (freeze_rain, ice_pell, rain, snow) done
@@ -124,15 +125,10 @@ hydromet_bulletin/
 - **Guard-call `assert_valid_for_bulletin()`**: интегрирован в `forecast_morning.py` и `forecast_evening.py` — fail-fast до statistics-слоя и `doc_builder`.
 
 ### В работе
-- Интеграционный тест CMEMS: `tests/test_integration_cmems.py` — **СОЗДАН, 3/3 PASSED**
-  - `test_download_returns_true_for_recent_date` — PASSED
-  - `test_download_creates_nc_files_in_storage_dir` — PASSED
-  - `test_timeout_is_respected` — PASSED (проверяет логи retry, не wall-clock время)
-- `pytest.ini` создан в корне, маркер `integration` зарегистрирован.
 - Интеграционный тест GFS: `tests/test_integration_gfs.py` — создан (требует сеть).
 
 ### Не начато
-- Интеграционные тесты end-to-end (полный цикл forecast → docx → email).
+- Интеграционные тесты end-to-end (полный цикл forecast → docx → email): **частично выполнены** (сессия 14) — dry-run → `.docx` пройден; осталось подтверждение доставки email (DT-14-U).
 
 
 ## 5. Ключевые технические решения
@@ -160,12 +156,12 @@ hydromet_bulletin/
 - **Dry-run date policy** (сессия 13, нормативный): основная dry-run дата — `today` (UTC); fallback — `today − 1` (обоснование: более выверенные модельные данные). Фиксация конкретной даты (например, `20260415`) в промптах — только как voluntary reference с явной пометкой; не является нормативным dry-run эталоном. Результаты dry-run 13.B на `20260415` признаются не верификационными.
 - **Параметр горизонта прогноза forecast_hours** (сессия 13, DT-13-1, нормативный): единственный источник правды для объёма запроса CMEMS и для валидации горизонта — ключ `forecast_hours` в секции `[CMEMS_FORECAST]` конфига (единица: часы; дефолт 120 = 5 суток × 24 ч). Compat-window β: одновременно поддерживаются `forecast_hours` (новый) и `forecast_days` (deprecated); при отсутствии `forecast_hours` — fallback `forecast_days × 24` с deprecation warning в логах; удаление `forecast_days` — в sweep-сессии. CLI-override: флаг `--forecast-hours` у `forecast_morning.py` и `forecast_evening.py`; CLI перекрывает config. ✅ Реализовано (DT-13-1, коммиты 8e56709 + 8055651): `config.example.ini` содержит `forecast_hours = 120` и `forecast_days = 5` (deprecated fallback); `config.ini` (gitignored) согласован на 120; CLI `--forecast-hours` у `forecast_morning.py`/`forecast_evening.py` — CLI > config, без парсинга суффиксов; `forecast_days` остаётся deprecated fallback до sweep-сессии.
 - **Validation horizon semantics** (сессия 13, DT-12-2 Part 2, нормативный, ✅ реализован d377661): `validate_outputs._validate_dates` сравнивает горизонт в часах: `horizon_hours_actual = (end_date − start_date).total_seconds() / 3600.0`; проверка `horizon_hours_actual >= forecast_hours − tol_hours`. Использование `.days` **запрещено**. **tol_hours = 3 — нормативное значение** (обоснование: CMEMS нормативно возвращает 8 отсечек × 3 ч без часа запуска модели → фактический горизонт = forecast_hours − 3ч; dry-run 20260415: 21.0h >= 24h − 3 → pass). **Текущее состояние кода (d377661):** `tol_hours = 0` по умолчанию в API; код-реализация `tol_hours = 3` — стартовая микро-задача сессии 14 (config-ключ или константа, на усмотрение реализатора). **Инспекция d377661 (14.A):** именованной константы или config-ключа со значением 3 в коде НЕТ — функции `_validate_dates`, `validate_wave_output`, `assert_valid_for_bulletin` имеют `tol_hours: int = 0` как дефолт API; логика сравнения (`horizon_hours_actual >= forecast_hours − tol_hours`) корректна и закрыта. **14.B verdict: code-шаг** — задача 14.B не является no-op; её scope: вынести 3 в `_NOMINAL_TOL_HOURS` (константа) или config-ключ `validation_tol_hours`; передавать явно через callers (`forecast_morning.py`, `forecast_evening.py`); поведение валидации при этом не меняется.
+- **Validation horizon tol_hours=3 implementation (сессия 14, 104c791)**: `tol_hours = 3` вынесен в именованную константу `NOMINAL_TOL_HOURS` и используется в валидации wave-horizon как нормативный допуск (поведение соответствует согласованному правилу сессии 13).
 - **GFS cycle selection — временная policy (DT-07-1, вариант B)**: при запуске `forecast_morning.py` / `forecast_evening.py` цикл GFS определяется как первый элемент из `GFS_CYCLES` в `[GFS_SOURCES]`:
   ```python
   gfs_cycle = cfg.get("GFS_SOURCES", "GFS_CYCLES", fallback="00z").split(",")[0].strip()
   ```
   Это **временное решение** в рамках адаптации processing layer (сессия 7); не является финальной policy. Финальное решение (явный `--cycle` CLI-параметр с приоритетом над конфигом) вынесено в DT-07-1 — см. раздел 9.
-- **Python интерпретатор**: использовать `py` (Python Launcher для Windows) — он автоматически находит установленный Python 3.x без привязки к конкретному пути.
 - **Python интерпретатор**: использовать `py` (Python Launcher для Windows) — он автоматически находит установленный Python 3.x без привязки к конкретному пути.  
   **НЕ использовать просто `python`** — в системе он указывает на Microsoft Store stub.
 - **Dev environment runtime policy** (сессия 13, нормативный): на dev-машине проекта `hydromet_bulletin` **нет работающих автоматических процессов** (cron / scheduler / service). Любые запуски (`fetch_inputs.py`, `forecast_morning.py`, `forecast_evening.py`, загрузчики GFS/CMEMS, конвертеры) выполняются **ТОЛЬКО вручную** — в рамках промптов сессии или явных команд пользователя. Cron-выражения в `config.ini` (`GFS_DOWNLOAD_SCHEDULE_CRON` и подобные) — это **намеренные настройки для будущего продакшена**, не реальные задания на текущей машине. **Следствие для агентов:** при анализе логов и состояния storage **НЕ предполагать**, что какие-либо данные появились или обновились автоматически; если нет явного ручного запуска в рамках сессии — данных нет.
@@ -207,22 +203,7 @@ hydromet_bulletin/
   - **Known limitation**: `ThreadPoolExecutor` не убивает зависший поток — поток `boto3` продолжает висеть в фоне после `future.result(timeout=N)`. Это ограничение `copernicusmarine` toolbox.
   - `test_timeout_is_respected` переработан: проверяет наличие строк `"timed out after 10s"` и `"retry attempts exhausted"` в логах, а не wall-clock время.
 
-- **РЕШЕНО: Несогласованная структура хранилища GFS**:
-  - CMEMS сохраняет файлы в `data/storage/` (финальное хранилище).
-  - GFS сохраняет в `data/work/gfs/` (рабочая директория) — несоответствие назначению.
-  - Часть файлов лежит в `data/work/gfs/` без подкаталогов, часть в `data/work/gfs/gfs/YYYYMMDD/` — двойной `gfs/gfs`, непоследовательно.
-  - `.idx`-файлы (индексы GRIB2) не фильтруются и засоряют хранилище.
-  - При параллельной загрузке возможна перезапись файлов с одинаковыми именами.
-  - **Целевая структура** (исправить в следующей задаче):
-    ```
-    data/
-    ├── work/cmems/        # временные файлы CMEMS
-    ├── work/gfs/          # временные файлы GFS
-    └── storage/
-        ├── cmems/YYYYMMDD/
-        └── gfs/YYYYMMDD/HHz/
-    ```
-  - **Что нужно исправить**: `gfs_downloader.py` (путь сохранения, фильтрация `.idx`), `config.example.ini` (`GFS_OUTPUT_DIR = data/storage/gfs`), привести `config.ini` в соответствие.
+- **РЕШЕНО: Несогласованная структура хранилища GFS** (сессия 14, bd70c79): дефолтный `results_subdir` мигрирован на `data/storage/gfs` с legacy fallback; pipeline использует единый storage layout без caller overrides.
 
 - **Ветки**: активны `master` и `feature/bulletin-generation`. Branch policy зафиксирована в разделе 11.2.
 
@@ -230,33 +211,19 @@ hydromet_bulletin/
 ## 7. История ключевых коммитов
 
 ```
-c2017ff (HEAD -> feature/bulletin-generation) feat: add validate_outputs module with pipeline guard (v1)
-c183c0e docs: unify context files and enforce feature branch discipline
+6efa10e feat(wave): enforce CMEMS R<run_date> contract, fill-value decode, nanmean
+bd70c79 fix(storage): migrate meteo results_subdir default to data/storage/gfs + legacy fallback
+90523af fix(dry-run): resolve run_date with CMEMS+GFS availability check
+104c791 fix(validate): implement NOMINAL_TOL_HOURS=3 for wave horizon validation
+8055651 feat(cli): add --forecast-hours + dry-run date policy (CMEMS-only scope)
+8e56709 chore(config): forecast_days -> forecast_hours compat-window (beta)
+d377661 fix(validate): validate wave horizon in hours (tol_hours)
+fffc359 fix(wave): compute start/end from union(time_arr) across CMEMS files
+75cf010 fix(wave): canonical axes (lat,lon,time) and remove MATLAB transposes
+72c6557 fix(meteo): remove .T from meshgrid to align mask and data axes
+c2017ff feat: add validate_outputs module with pipeline guard (v1)
 47de5fe test(cmems): add integration tests for CMEMSDownloader with retry and timeout validation
-XXXXXXX docs(project): add project_context.md for AI session continuity
-5d97490 fix(cmems): add retry + timeout protection to CMEMSDownloader
-0cb3678 (origin/master) feat: data ingestion layer — CMEMS + GFS downloaders
-e478c1d (origin/feature/data-ingestion, feature/data-ingestion) fix(fetch_inputs): update required sections to CMEMS_*/GFS_* pattern
-a161f2c test(smoke): fix attribute names after gfs_downloader refactor
-6eefb07 docs: update project progress after session 3
-a289908 chore: fix .gitignore for data dirs, add copernicusmarine to requirements
-0f91038 fix(cmems): update section names to CMEMS_SOURCES/CMEMS_FORECAST
-6087377 chore(config): sync config.example.ini with current structure
-548137d fix(gfs): rewrite downloader to use NOMADS filter URL via requests
-7c9d352 docs: add project progress tracking with Mermaid diagrams
-00ceed4 fix: GFS direct URL, CMEMS copernicusmarine toolbox, silent login
-ad6f9e2 Add smoke tests for CMEMSDownloader, GFSDownloader init and fetch_inputs import
-485cb10 Implement GFSDownloader.download() with URL build, retry, validation, completeness check
-877e5d3 Implement CMEMSDownloader.download() — move config reads to __init__, eliminate redundancy
-92dbf0f Add fetch_inputs entry point and downloaders skeleton (CMEMS + GFS)
-7438bda Add data ingestion architecture, GFS docs and update Windsurf rules
-e92d3ea Extend config.example.ini with GFS parameters
-c82607c Ignore local etalon_data samples
-4adb86e Add data ingestion config example and docs
-6345d8e Update gitignore for etalon NetCDF files
-be11493 Add Windsurf rules for secrets and configs
-7632f2b Update gitignore for matlab_original docs
-d63ae3a Baseline hydromet bulletin project (Python + Docker)
+0cb3678 feat: data ingestion layer — CMEMS + GFS downloaders
 ```
 
 **Статус веток:**
@@ -331,9 +298,15 @@ d63ae3a Baseline hydromet bulletin project (Python + Docker)
 - **DT-12-2** ✅ **Закрыт (сессия 13, fffc359 + d377661)**: Part 1 (fffc359): min/max по union(time_arr) в `collect_wave_data`. Part 2 (d377661): `_validate_dates` → часы, `horizon_hours_actual >= forecast_hours − tol_hours`. tol_hours = 3 нормативное значение; код-реализация tol_hours = 3 — стартовая микро-задача сессии 14. Вариант 3 rescinded.
 - **DT-13-1** ✅ **Закрыт (сессия 13, 8e56709 + 8055651)**: compat-window β: приоритет `forecast_hours` → `forecast_days × 24` (deprecated warning) → 120h default; `config.example.ini` + `config.ini` согласованы на 120; CLI `--forecast-hours` (int); CLI > config.
 - **DT-13-2** ✅ **Закрыт по scope (сессия 13, 8055651); insufficient for full E2E — см. DT-13-3**: `_resolve_run_date_for_dry_run`: explicit `--date` отключает fallback; без `--date` — today (UTC) → fallback today-1 → иначе `FileNotFoundError`; проверка через `_discover_cmems_nc_files` — только CMEMS (GFS не проверяется).
-- **DT-13-3** ⚠️ **OPEN / HIGH (сессия 14, critical path)**: date policy не учитывает GFS. `_resolve_run_date_for_dry_run` не проверяет GFS storage. Evidence: dry-run 20260420 без `--date` → `FileNotFoundError: No GFS .nc files found for run_date=20260420`. Fix: симметричная проверка GFS + fallback today-1 при отсутствии GFS за today. DoD: dry-run без `--date` проходит при наличии GFS за today-1.
-- **DT-13-4** ⚠️ **OPEN / HIGH (сессия 14, critical path, clean migration)**: storage layout mismatch — `collect_meteo_data` дефолт `results_subdir = "Meteo_Parser_2026/results"` (legacy MATLAB). `forecast_morning.py` не переопределяет; поиск `.nc` уходит в legacy-каталог. Fix: поменять дефолт на `data/storage/gfs`-layout; обновить legacy-тесты; DT-13-5 поглощён данной задачей.
-- **DT-13-6** ⚠️ **OPEN / LOW (sweep)**: config drift — `files_per_cycle 5` (config.ini) vs `10` (config.example.ini). Fix: согласовать в обоих файлах.
+- **DT-13-3** ✅ **Закрыт (сессия 14, 90523af)**: date policy теперь учитывает GFS availability check + fallback today-1 при отсутствии GFS за today.
+- **DT-13-4** ✅ **Закрыт (сессия 14, bd70c79 + 6efa10e)**: storage layout migration (meteo-side) + CMEMS wave contract/discovery (wave-side).
+- **DT-13-6** ⚠️ **Частично закрыт (сессия 14, audit verdict)**: выявлены мёртвые ключи; решение B: оставить как `legacy/reserved` с пометкой в docs; cleanup конфига — отдельный sweep при необходимости.
+- **DT-14-V**: unified `forecast.py` CLI (`--cycle/--run-hour/--first-forecast-dt/--no-send`).
+- **DT-14-U**: email delivery verification (логи success, но письма нет).
+- **DT-14-T**: `.docx` filename convention — start_date-based, не request-date-based.
+- **DT-14-S**: `RuntimeWarning: Mean of empty slice` от `nanmean` в `collect_wave_data.py`.
+- **DT-14-Y**: exit code propagation в forecast runner.
+- **DT-14-Z**: scheduled ingestion + archive rotation для CMEMS/GFS.
 - **Normalizing/preprocessing layer для GFS**: после v1, если прямой переход `gfs_downloader` → `collect_meteo_data` останется неудобным.
 - **Downstream validation перед `doc_builder.py`**: day-level проверка сформированных диапазонов (`wind_min ≤ wind_max` и т.д.); не блокирует v1.
 - **Soft quality rules**: физические диапазоны, NaN ratio thresholds, sanity checks для precipitation — warning-only layer после MVP.
