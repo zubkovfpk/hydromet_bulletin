@@ -18,13 +18,10 @@ from pathlib import Path
 from utils.collect_meteo_data import collect_meteo_data, has_cmems_for_date, has_gfs_for_date
 from utils.collect_wave_data import collect_wave_data
 from utils.downloaders.cmems_downloader import resolve_cmems_forecast_hours
-from utils import (
-    wind_statistics,
-    precip_statistics,
-    temp_statistics_morning,
-    create_bulletin_doc,
-    send_bulletin,
-)
+from utils.wind_statistics import wind_statistics
+from utils.precip_statistics import precip_statistics
+from utils.temp_statistics import temp_statistics_morning
+from utils import create_bulletin_doc, send_bulletin
 from utils.validate_outputs import NOMINAL_TOL_HOURS, assert_valid_for_bulletin
 
 # ── Логирование ──────────────────────────────────────────────────────────────
