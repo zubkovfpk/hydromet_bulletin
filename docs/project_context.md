@@ -19,7 +19,7 @@ GFS (NOMADS) и волновых данных CMEMS, обработка, ген�
 
 Подробные правила работы с документацией, ветками и deferred-задачами — см. **раздел 11**.
 
-- `docs/adr/ADR-001-on-demand-ingestion.md` — архитектурное решение on-demand модели загрузки (X-variant, сессия 15).
+- `docs/adr/001-ondemand-ingestion.md` — архитектурное решение on-demand модели загрузки (X-variant, сессия 15).
   Ключевые параметры: GFS lag 6h, CMEMS lag 12h, polling interval 10 min, окно запуска до 19:00 MSK (6 ч от typical request time).
   Единая точка входа `forecast_main.py` с параметрами `--date YYYY-MM-DD --time HH:MM --tz MSK`; внутри MSK явно конвертируется в UTC.
   Старые `forecast_morning.py` / `forecast_evening.py` помечены deprecated и подлежат удалению после миграции (этап 15.E).

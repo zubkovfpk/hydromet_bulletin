@@ -2526,7 +2526,7 @@ Session 14 closed.
 7. **Именование точки входа** — `forecast_main.py` в корне, TZ=MSK с явным конвертом в UTC внутри модуля.
 
 ### Артефакты
-- `docs/adr/ADR-001-on-demand-ingestion.md` — 970 lines, 64 KB; применены 10/10 review-fixes (5 main + 3 schema + 2 из блока 5b).
+- `docs/adr/001-ondemand-ingestion.md` — 970 lines, 64 KB; применены 10/10 review-fixes (5 main + 3 schema + 2 из блока 5b).
 - Коммиты ветки `feature/bulletin-generation`:
   - `293b0bf` — 15.A kickoff docs S15 (DoD U+V, parking lot carried).
   - `0291326` — 15.B ADR-001 on-demand ingestion (X-variant).
