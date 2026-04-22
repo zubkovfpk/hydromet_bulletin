@@ -40,6 +40,14 @@ gantt
     Интеграционный тест email    :2026-04-24, 1d
     Docker + cron финализация    :2026-04-25, 2d
     End-to-end тест              :2026-04-27, 1d
+    section Session 15 (2026-04-22)
+    15.A docs kick-off                 :active, 2026-04-22, 1d
+    15.B unified forecast_main.py CLI  :2026-04-22, 1d
+    15.C docx filename convention      :2026-04-22, 1d
+    15.D wave empty-slice warning fix  :2026-04-22, 1d
+    15.E email verify on prod SMTP     :2026-04-22, 1d
+    15.F exit codes propagation        :2026-04-22, 1d
+    15.G S15 close docs                :2026-04-22, 1d
     Финальный merge в master     :2026-04-28, 1d
 ```
 
@@ -61,15 +69,25 @@ gantt
 | 12 | 19.04.2026 | ~3 ч | DT-11-1 закрыт (3-tier CMEMS discovery) + DT-12-1 закрыт (wave axis canon); изолирован DT-12-2 (temporal validation) |
 | 13 | 20.04.2026 | ~4 ч | DT-12-2 (temporal validation) закрыт; `forecast_days`→`forecast_hours` (DT-13-1); CMEMS-only dry-run policy (DT-13-2); выявлены DT-13-3/4/6 |
 | 14 | 21–22.04.2026 | ~5 ч | Dry-run → `.docx` end-to-end; DT-13-3/4 закрыты; аудит DT-13-6; parking lot DT-14-S/T/U/V/Y/Z зафиксированы |
+| 15 | 22.04.2026 | ~6 ч (13:00–19:00 MSK) | В работе: DT-14-V/U/T/S/Y; hard-cut на unified `forecast_main.py`; email verify на прод-SMTP |
 
-## Общий прогресс: ~80%
+## Общий прогресс: ~80% (на начало S15)
+
+**Прогноз к концу S15:** ~90% при закрытии DT-14-V + DT-14-U + 3-of-3 should (T, S, Y).
 
 ```mermaid
-pie
-    title Выполнено vs Осталось
-    "Выполнено" : 80
-    "Осталось"  : 20
+pie title Прогресс проекта (начало S15)
+  "Выполнено" : 80
+  "S15 scope" : 10
+  "Осталось после S15" : 10
 ```
+
+### In-progress (S15, open 2026-04-22)
+- **DT-14-V** unified `forecast_main.py` CLI — hard-cut old scripts.
+- **DT-14-U** email delivery verification on prod corporate SMTP.
+- **DT-14-T** `.docx` filename convention `Прогноз_{cycle}_{start_date}.docx`.
+- **DT-14-S** `RuntimeWarning: Mean of empty slice` in `collect_wave_data.py`.
+- **DT-14-Y** pipeline exit codes propagation (0/1/2/3/>=10).
 
 ## Deferred tasks
 
@@ -90,11 +108,6 @@ pie
  | DT-13-3 | ~~**[OPEN / HIGH — сессия 14, critical path]**~~ **Закрыт (сессия 14, 90523af).** **Title:** date policy не учитывает GFS. **Fix (90523af):** `_resolve_run_date_for_dry_run` проверяет наличие GFS в storage; при отсутствии за today (UTC) откатывается на today-1; поведение explicit `--date` не меняется. **DoD:** dry-run без `--date` корректно выбирает дату с совместным наличием CMEMS+GFS и не падает в `collect_meteo_data`. | **high** | Закрыт |
  | DT-13-4 | ~~**[OPEN / HIGH — сессия 14, critical path, clean migration]**~~ **Закрыт (сессия 14, bd70c79 + 6efa10e).** **Title:** storage layout mismatch — legacy default `results_subdir` и wave-side контракт CMEMS. **Fix:** meteo-side (bd70c79) — дефолтный `results_subdir` мигрирован на `data/storage/gfs` с legacy fallback; wave-side (6efa10e) — CMEMS contract и discovery приведены к `R<run_date>` + NaN/fill-value/nanmean. **DoD:** pipeline использует новый layout без caller overrides; full dry-run до `.docx` пройден. | **high** | Закрыт |
  | DT-13-6 | ~~**[OPEN / LOW — sweep-сессия]** **Частично закрыт (сессия 14, audit verdict).** `files_per_cycle` и ряд ключей в `[CMEMS_SOURCES]` оказались мёртвыми (не читаются кодом). Принято решение **B**: оставить ключи как `legacy/reserved` (без удаления) и зафиксировать в docs; cleanup конфига — отдельный sweep при необходимости. | **low** | Частично закрыт |
- | DT-14-V | unified `forecast.py` CLI (`--cycle/--run-hour/--first-forecast-dt/--no-send`). | medium | Parking lot |
- | DT-14-U | email delivery verification (логи success, но письма нет). | high | Parking lot |
- | DT-14-T | `.docx` filename convention — start_date-based, не request-date-based. | medium | Parking lot |
- | DT-14-S | `RuntimeWarning: Mean of empty slice` от `nanmean` в `collect_wave_data.py`. | low | Parking lot |
- | DT-14-Y | exit code propagation в forecast runner. | medium | Parking lot |
  | DT-14-Z | scheduled ingestion + archive rotation для CMEMS/GFS. | medium | Parking lot |
  | DT-02 | Normalizing/preprocessing layer для GFS | medium | После Processing layer adaptation |
  | DT-03 | Downstream validation перед `doc_builder.py` | low | После validate_outputs v1 |

@@ -2460,3 +2460,47 @@ Session 14 closed.
 - `cb85068` — 14.I: statistics imports fix.
 
 **Open DT (parking lot for future sessions):** DT-14-V, DT-14-U, DT-14-T, DT-14-S, DT-14-Y, DT-14-Z.
+
+---
+
+## Сессия 15 — открытие (2026-04-22, 13:00 MSK, Химки)
+
+### Контекст на входе
+- Ветка `feature/bulletin-generation`, HEAD `727177a` («14.E docs close S14»).
+- Pre-flight: пункты 1, 2, 9 подтверждены (branch, HEAD == origin, no in-progress ops); пункты 3, 4, 5, 6, 8, 11 формально не закрыты из-за санитайзер-поломки bash-скрипта (вырезаны `$`, `[`, `]`, `|`, `{`, `}`). **Принято как есть по решению оператора**: git prompt чистый (нет `*`/`+`/`%`), tracked changes отсутствуют, untracked — ожидаемые артефакты из S13–S14.
+- Общий прогресс на входе: ~80%.
+
+### Согласованные параметры S15
+1. Основной DoD: **DT-14-U (email verify, prod SMTP) + DT-14-V (unified CLI)**.
+2. SMTP: **боевой корпоративный** (креды — только локально в `config.ini`).
+3. Миграция CLI: **hard-cut** — единый `forecast_main.py` в корне; `forecast_morning.py` / `forecast_evening.py` удаляются в том же commit; `crontab` / `docker-compose.yml` / `entrypoint.sh` обновляются синхронно.
+4. Окно: **13:00–19:00 MSK (~6 ч)**.
+5. Pre-flight: **принят как есть**.
+6. `--date` timezone: **MSK с явной конвертацией в UTC внутри** (`zoneinfo.ZoneInfo("Europe/Moscow")`).
+7. Имя нового файла: **`forecast_main.py`** в корне репо.
+
+### Распределение ролей на S15
+- **Comet**: планирование, markdown-блоки для docs, промпты для Windsurf/Cursor, формулировки git-команд. Код не правит, git-команды не исполняет, файлы на диске не меняет.
+- **Git Bash** (оператор): все git-операции (`add` / `commit` / `push` / `status` / `diff`), запуск `python forecast_main.py`, сбор логов, pre-flight.
+- **Windsurf**: архитектурный слой — рефакторинг DT-14-V (разбор текущих `forecast_*.py`, выделение `utils/forecast_runner.py`, проектирование `forecast_main.py` CLI, multi-file diff), применение markdown-патчей в docs.
+- **Cursor**: операционализация — unit-тесты (DT-14-T, DT-14-S), точечные diff'ы, обновление `crontab` / `docker-compose.yml` / `entrypoint.sh` / `README.md`, проверка отсутствия битых импортов после hard-cut.
+
+### Порядок коммитов S15
+- **15.A** `docs(session-15): open S15 plan, DoD U+V, parking lot carried` — текущий коммит (apply docs patch).
+- **15.B** `feat(forecast): unified forecast_main.py CLI, drop morning/evening scripts (DT-14-V)` — hard-cut + синхронное обновление `crontab` / `docker-compose.yml` / `entrypoint.sh` / `README.md`.
+- **15.C** `feat(output): start_date-based docx filename convention + tests (DT-14-T)`.
+- **15.D** `fix(cmems-wave): silence empty-slice RuntimeWarning (DT-14-S)`.
+- **15.E** `chore(email): verified real SMTP delivery, add runbook (DT-14-U)`.
+- **15.F** `feat(pipeline): propagate structured exit codes 0/1/2/3 (DT-14-Y)`.
+- **15.G** `docs(session-15): close S15, update progress to ~90%, move DT-14-Z to S16`.
+
+### Parking lot → S16
+- DT-14-Z (cron wrapper + archive rotation), если не заберём в 15.H stretch.
+- DT-10-5 (_build_mask optimization, low prio).
+- DT-08-* (logging register / rotation / permissions).
+- DT-13-6 (полный cleanup legacy config keys).
+- DT-07-1 (CLI `--cycle` для GFS-слоя).
+
+### Открытые вопросы на вход 15.E
+- Host / port / TLS-режим / from / to корпоративного SMTP — оператор предоставит перед стартом 15.E.
+- Пароль SMTP — только локально в `config.ini`; в чат / репо / логи не попадает.

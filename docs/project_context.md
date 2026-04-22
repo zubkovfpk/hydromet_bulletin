@@ -125,7 +125,7 @@ hydromet_bulletin/
 - **Guard-call `assert_valid_for_bulletin()`**: интегрирован в `forecast_morning.py` и `forecast_evening.py` — fail-fast до statistics-слоя и `doc_builder`.
 
 ### В работе
-- Интеграционный тест GFS: `tests/test_integration_gfs.py` — создан (требует сеть).
+- В работе (S15, 2026-04-22, 13:00–19:00 MSK): unified `forecast_main.py` CLI (DT-14-V, hard-cut), email verify на боевом корпоративном SMTP (DT-14-U), docx filename convention (DT-14-T), wave empty-slice warning (DT-14-S), structured exit codes (DT-14-Y).
 
 ### Не начато
 - Интеграционные тесты end-to-end (полный цикл forecast → docx → email): **частично выполнены** (сессия 14) — dry-run → `.docx` пройден; осталось подтверждение доставки email (DT-14-U).
@@ -288,6 +288,37 @@ c2017ff feat: add validate_outputs module with pipeline guard (v1)
 - horizon/date consistency warnings (если даты/горизонт выходят за ожидаемое окно, но не нарушают базовый контракт).
 
 ## 9. Deferred tasks / Future work
+
+### 9.0 Session 15 — active scope (open 2026-04-22, 13:00 MSK)
+
+**Session DoD (must):**
+- **DT-14-V** — единый `forecast_main.py` в корне репо; `forecast_morning.py` / `forecast_evening.py` удалены (hard-cut, без deprecation shim); `crontab`, `docker-compose.yml`, `entrypoint.sh` синхронно обновлены в том же PR.
+- **DT-14-U** — email delivery верифицирован на боевом корпоративном SMTP; артефакт: `Message-ID` в логах `email_sender` + подтверждение получения.
+
+**Session DoD (should):**
+- **DT-14-T** — filename convention `Прогноз_{cycle_ru}_{start_date:YYYYMMDD}.docx`; функция `resolve_start_date(cycle, run_hour, run_date)` + unit-тесты на границах суток MSK/UTC.
+- **DT-14-S** — устранён `RuntimeWarning: Mean of empty slice` в `collect_wave_data.py`; регрессионный тест на all-NaN срезе.
+- **DT-14-Y** — exit codes pipeline: `0` success, `1` validation fail, `2` ingestion fail, `3` delivery fail, `>=10` internal; смоук-тест на пустом GFS → exit 2.
+
+**Stretch:**
+- DT-14-Z — cron wrapper + archive rotation (если есть время до 19:00 MSK).
+
+**Out of scope (→ S16+):**
+- Финальный merge в `master`, полный E2E, DT-10-5 (_build_mask opt), DT-08-* (logging hygiene), DT-13-6 (full config cleanup).
+
+**Архитектурные решения S15:**
+- **CLI контракт** `forecast_main.py` (в корне репо):
+python forecast_main.py --cycle {morning|evening}
+--run-hour {00|06|12|18}
+[--date YYYY-MM-DD] # MSK; default = today MSK
+[--dry-run]
+[--no-email]
+- **Таймзона `--date`**: интерпретация в **MSK** (`Europe/Moscow`), явная конверсия в UTC внутри (`zoneinfo.ZoneInfo("Europe/Moscow")` → `astimezone(UTC)`) перед запросами к GFS/CMEMS.
+- **Shared runner**: общая логика — в `utils/forecast_runner.py`; cycle-specific — через диспетчер по `--cycle`.
+- **SMTP**: корпоративный; креды только в `config.ini` на машине оператора (в репо/логи/чат не попадают).
+
+**Parking lot carried from S14 (scope S15):** DT-14-V, DT-14-U, DT-14-T, DT-14-S, DT-14-Y.
+**Parking lot carried to S16:** DT-14-Z, DT-10-5, DT-08-* (logging), DT-13-6 (full config cleanup).
 
 - **DT-01 — GFS GRIB2 → NetCDF conversion / preprocessing** ✅ **Закрыт (сессия 10, MVP).** Реализован Вариант A: `_convert_grib_to_netcdf` + `convert_existing` в `gfs_downloader.py`, sidecar `.nc` рядом с GRIB2, 9 переменных с правильным маппингом, `lat`/`lon` дименсии. DoD подтверждён: `collect_meteo_data` находит 40/40 `.nc` и читает все 9 переменных в dry-run `forecast_morning.py --date 20260415`.
 - **DT-10-3 — Shape mismatch маски и данных** ✅ **Закрыт (сессия 11, Вариант A, 72c6557).** Удалён `.T` в meshgrid `collect_meteo_data.py`: `Lon, Lat = np.meshgrid(lon_arr, lat_arr)` (no `.T`). Маска `(721,1440)` = данные `(721,1440,n)`. `mask shape=(721,1440)`, `cells_inside=236`. DoD выполнен. Downstream-чек: ни один downstream-модуль не предполагает `(n_lon,n_lat)`. Новые тесты: `test_collect_meteo_mask_orientation.py` (2 теста passed).
