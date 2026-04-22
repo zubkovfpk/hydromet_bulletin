@@ -18,7 +18,7 @@ gantt
     gfs_downloader.py            :done, 2026-04-12, 1d
     Интеграционные тесты CMEMS   :done, 2026-04-13, 1d
     Настройка Windsurf/Pyright   :done, 2026-04-14, 1d
-    Интеграционные тесты GFS     :active, 2026-04-14, 1d
+    Интеграционные тесты GFS     :done, 2026-04-14, 1d
     section Обработка данных
     collect_meteo_data.py        :done, 2026-04-12, 1d
     collect_wave_data.py         :done, 2026-04-12, 1d
@@ -31,10 +31,10 @@ gantt
     Shapefile path resolution    :done, 2026-04-16, 1d
     section Генерация бюллетеня
     doc_builder.py (каркас)      :done, 2026-04-12, 1d
-    Шаблон .docx (стили/секции) :2026-04-17, 2d
-    forecast_morning.py          :2026-04-19, 2d
-    forecast_evening.py          :2026-04-21, 2d
-    Тест генерации бюллетеня     :2026-04-23, 1d
+    Шаблон .docx (стили/секции) :done, 2026-04-17, 2d
+    forecast_morning.py          :done, 2026-04-19, 2d
+    forecast_evening.py          :done, 2026-04-21, 2d
+    Тест генерации бюллетеня     :active, 2026-04-23, 1d
     section Доставка
     email_sender.py              :done, 2026-04-12, 1d
     Интеграционный тест email    :2026-04-24, 1d
@@ -58,15 +58,17 @@ gantt
 | 9 | 16.04.2026 | ~2 ч | BOM-fix config.ini, import-fix collect_meteo_data, dry-run частично успешен, выявлен Blocker #3 (DT-01: GRIB2→NetCDF) |
 | 10 | 17–18.04.2026 | ~5 ч | DT-01 реализован (Вариант A + follow-up convert_existing); первый end-to-end dry-run пройден до processing stage; 40/40 .nc созданы; новое падение: shape mismatch маски → Blocker #4 (DT-10-3) |
 | 11 | 18.04.2026 | ~2 ч | Pre-work Windsurf: canonical axis contract, варианты A/B/C. Cursor: DT-10-3 закрыт (Вариант A, убран `.T`) + DT-10-4 закрыт (strict GRIB glob). Dry-run прошёл mask stage (236 ячеек), новое падение: FileNotFoundError в collect_wave_data (DT-11-1) |
-| 12 | 19.04.2026 | в процессе | Pre-work Windsurf: CMEMS lookup contract, wave axis canon, DT-12-1. Cursor (acbcfba): DT-11-1 частично — 3-tier discovery. DT-12-1 открыт: wave массив в (lon,lat,5) vs канонических (lat,lon,5) |
+| 12 | 19.04.2026 | ~3 ч | DT-11-1 закрыт (3-tier CMEMS discovery) + DT-12-1 закрыт (wave axis canon); изолирован DT-12-2 (temporal validation) |
+| 13 | 20.04.2026 | ~4 ч | DT-12-2 (temporal validation) закрыт; `forecast_days`→`forecast_hours` (DT-13-1); CMEMS-only dry-run policy (DT-13-2); выявлены DT-13-3/4/6 |
+| 14 | 21–22.04.2026 | ~5 ч | Dry-run → `.docx` end-to-end; DT-13-3/4 закрыты; аудит DT-13-6; parking lot DT-14-S/T/U/V/Y/Z зафиксированы |
 
-## Общий прогресс: ~70%
+## Общий прогресс: ~80%
 
 ```mermaid
 pie
     title Выполнено vs Осталось
-    "Выполнено" : 70
-    "Осталось"  : 30
+    "Выполнено" : 80
+    "Осталось"  : 20
 ```
 
 ## Deferred tasks
@@ -88,9 +90,15 @@ pie
  | DT-13-3 | ~~**[OPEN / HIGH — сессия 14, critical path]**~~ **Закрыт (сессия 14, 90523af).** **Title:** date policy не учитывает GFS. **Fix (90523af):** `_resolve_run_date_for_dry_run` проверяет наличие GFS в storage; при отсутствии за today (UTC) откатывается на today-1; поведение explicit `--date` не меняется. **DoD:** dry-run без `--date` корректно выбирает дату с совместным наличием CMEMS+GFS и не падает в `collect_meteo_data`. | **high** | Закрыт |
  | DT-13-4 | ~~**[OPEN / HIGH — сессия 14, critical path, clean migration]**~~ **Закрыт (сессия 14, bd70c79 + 6efa10e).** **Title:** storage layout mismatch — legacy default `results_subdir` и wave-side контракт CMEMS. **Fix:** meteo-side (bd70c79) — дефолтный `results_subdir` мигрирован на `data/storage/gfs` с legacy fallback; wave-side (6efa10e) — CMEMS contract и discovery приведены к `R<run_date>` + NaN/fill-value/nanmean. **DoD:** pipeline использует новый layout без caller overrides; full dry-run до `.docx` пройден. | **high** | Закрыт |
  | DT-13-6 | ~~**[OPEN / LOW — sweep-сессия]** **Частично закрыт (сессия 14, audit verdict).** `files_per_cycle` и ряд ключей в `[CMEMS_SOURCES]` оказались мёртвыми (не читаются кодом). Принято решение **B**: оставить ключи как `legacy/reserved` (без удаления) и зафиксировать в docs; cleanup конфига — отдельный sweep при необходимости. | **low** | Частично закрыт |
-| DT-02 | Normalizing/preprocessing layer для GFS | medium | После Processing layer adaptation |
-| DT-03 | Downstream validation перед `doc_builder.py` | low | После validate_outputs v1 |
-| DT-04 | Soft quality rules (физ. диапазоны, NaN ratio, sanity checks) | low | После MVP validate_outputs |
+ | DT-14-V | unified `forecast.py` CLI (`--cycle/--run-hour/--first-forecast-dt/--no-send`). | medium | Parking lot |
+ | DT-14-U | email delivery verification (логи success, но письма нет). | high | Parking lot |
+ | DT-14-T | `.docx` filename convention — start_date-based, не request-date-based. | medium | Parking lot |
+ | DT-14-S | `RuntimeWarning: Mean of empty slice` от `nanmean` в `collect_wave_data.py`. | low | Parking lot |
+ | DT-14-Y | exit code propagation в forecast runner. | medium | Parking lot |
+ | DT-14-Z | scheduled ingestion + archive rotation для CMEMS/GFS. | medium | Parking lot |
+ | DT-02 | Normalizing/preprocessing layer для GFS | medium | После Processing layer adaptation |
+ | DT-03 | Downstream validation перед `doc_builder.py` | low | После validate_outputs v1 |
+ | DT-04 | Soft quality rules (физ. диапазоны, NaN ratio, sanity checks) | low | После MVP validate_outputs |
 | DT-05 | Интеграционные тесты end-to-end (forecast → docx → email) | high | После Генерации бюллетеня |
 | DT-07-1 | GFS cycle как явный параметр (`--cycle` CLI или `GFS_CYCLE_MORNING/EVENING`) | medium | Сессия 8 |
 | DT-07-2 | `logger.info` resolved path для CMEMS в `_resolve_cmems_wave_dir()` | low | Сессия 8 или по необходимости |
