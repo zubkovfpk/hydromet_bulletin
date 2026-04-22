@@ -2504,3 +2504,42 @@ Session 14 closed.
 ### Открытые вопросы на вход 15.E
 - Host / port / TLS-режим / from / to корпоративного SMTP — оператор предоставит перед стартом 15.E.
 - Пароль SMTP — только локально в `config.ini`; в чат / репо / логи не попадает.
+
+---
+
+## Сессия 15 — 2026-04-22, 11:00–19:00 MSK
+
+### Контекст
+Продолжение после сессии 14. Pre-flight Git Bash с синтаксическими ошибками shell — приняты как есть, сессию не блокируют. Фокус сессии переопределён с «тест генерации бюллетеня» на «архитектурная синхронизация on-demand модели» (α-variant).
+
+### Решения сессии 15
+1. **DoD** — U+V как основной фокус (единый загрузчик + единая точка входа).
+2. **SMTP** — боевой корпоративный для верификации (не dev-sandbox). Реквизиты передаются на входе в 15.E.
+3. **Миграция** — hard-cut: переход на один загрузчик с параметрами даты/времени, без bridge-слоя.
+4. **Окно запуска** — стандартное до 19:00 MSK (6 ч).
+5. **Pre-flight errors** — принимаем как есть.
+6. **Архитектура загрузки** — X-variant (полный редизайн), зафиксирован в ADR-001.
+   - GFS lag: 6h (корректировка с 4h)
+   - CMEMS lag: 12h
+   - Polling interval: 10 min
+   - AI-scheduler: parking lot (будущее)
+7. **Именование точки входа** — `forecast_main.py` в корне, TZ=MSK с явным конвертом в UTC внутри модуля.
+
+### Артефакты
+- `docs/adr/ADR-001-on-demand-ingestion.md` — 970 lines, 64 KB; применены 10/10 review-fixes (5 main + 3 schema + 2 из блока 5b).
+- Коммиты ветки `feature/bulletin-generation`:
+  - `293b0bf` — 15.A kickoff docs S15 (DoD U+V, parking lot carried).
+  - `0291326` — 15.B ADR-001 on-demand ingestion (X-variant).
+- Untracked debug-артефакты (dry_run_*, probe_*, ingest_*, diff_*.patch, pre-flight.sh) — кандидаты на DT-15-A cleanup.
+
+### Разделение ролей в сессии
+- **Comet** — планирование, анализ canonical docs, генерация Windsurf-промптов.
+- **Windsurf** — применение docs-правок через plain-text FIND/REPLACE.
+- **Cursor** — операционализация кода (зарезервирован для 15.D: forecast_main.py + CLI).
+- **Git Bash** — pre-flight, git add/commit/push, git status/log.
+
+### Открытые задачи на вход 15.D
+- forecast_main.py скелет с argparse (`--date`, `--time`, `--tz`).
+- Конвертация MSK→UTC, вычисление ближайшего GFS-цикла с lag 6h, CMEMS с lag 12h.
+- Polling loop 10 min до availability или таймаут 6 ч.
+- Deprecation-хедеры в forecast_morning.py / forecast_evening.py.
