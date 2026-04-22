@@ -61,3 +61,23 @@ etalon_data/
 # OS files
 Thumbs.db
 .DS_Store
+
+# === Debug artifacts (sessions 13-15) — DT-15-A ===
+# Локальные вспомогательные скрипты, их логи и временные дампы.
+# Остаются на диске для отладки, но в репозиторий не попадают.
+dry_run_*.txt
+dry_run_*.out.txt
+ingest_*.py
+ingest_*.out.txt
+probe_*.py
+probe_*.out.txt
+cmems_fs_check_*.txt
+wave_aggregate_*.txt
+wave_inventory_*.txt
+nc_vars_*.txt
+runtime_data_paths.txt
+project_tree.txt
+project_files.txt
+diff_*.patch
+pre-flight.sh
+Git_Bash_pre-flight_prompt.txt

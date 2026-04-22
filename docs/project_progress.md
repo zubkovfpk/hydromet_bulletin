@@ -40,21 +40,18 @@ gantt
     Интеграционный тест email    :2026-04-24, 1d
     Docker + cron финализация    :2026-04-25, 2d
     End-to-end тест              :2026-04-27, 1d
-    section Session 15 (2026-04-22)
-    15.A docs kick-off                 :active, 2026-04-22, 1d
-    15.B unified forecast_main.py CLI  :2026-04-22, 1d
-    15.C docx filename convention      :2026-04-22, 1d
-    15.D wave empty-slice warning fix  :2026-04-22, 1d
-    15.E email verify on prod SMTP     :2026-04-22, 1d
-    15.F exit codes propagation        :2026-04-22, 1d
-    15.G S15 close docs                :2026-04-22, 1d
     Финальный merge в master     :2026-04-28, 1d
     section Сессия 15 (архитектура on-demand)
     15.A Kickoff docs S15            :done, 2026-04-22, 1d
     15.B ADR-001 on-demand (X)       :done, 2026-04-22, 1d
-    15.C Sync canonical docs         :active, 2026-04-22, 1d
-    15.D forecast_main.py + CLI      :2026-04-23, 2d
-    15.E Migration + SMTP verify     :2026-04-25, 1d
+    15.C Sync canonical docs         :done, 2026-04-22, 1d
+    15.D.1 forecast_main skeleton    :done, 2026-04-22, 1d
+    15.D.2 resolve gfs/cmems         :done, 2026-04-22, 1d
+    15.F Closeout S15                :done, 2026-04-22, 1d
+    section Сессия 16 (интеграция и доставка)
+    15.D.3 polling + integration     :2026-04-23, 1d
+    15.D.4 deprecation + README      :2026-04-24, 1d
+    15.E Migration + SMTP verify     :2026-04-25, 2d
 ```
 
 ## Хронология сессий
@@ -75,7 +72,7 @@ gantt
 | 12 | 19.04.2026 | ~3 ч | DT-11-1 закрыт (3-tier CMEMS discovery) + DT-12-1 закрыт (wave axis canon); изолирован DT-12-2 (temporal validation) |
 | 13 | 20.04.2026 | ~4 ч | DT-12-2 (temporal validation) закрыт; `forecast_days`→`forecast_hours` (DT-13-1); CMEMS-only dry-run policy (DT-13-2); выявлены DT-13-3/4/6 |
 | 14 | 21–22.04.2026 | ~5 ч | Dry-run → `.docx` end-to-end; DT-13-3/4 закрыты; аудит DT-13-6; parking lot DT-14-S/T/U/V/Y/Z зафиксированы |
-| 15 | 22.04.2026 | ~6 ч (13:00–19:00 MSK) | В работе: DT-14-V/U/T/S/Y; hard-cut на unified `forecast_main.py`; email verify на прод-SMTP |
+| 15 | 22.04.2026 | ~6 ч (13:00–19:00 MSK) | ADR-001 on-demand (X-variant) зафиксирован; `forecast_main.py` skeleton + CLI + `msk_to_utc` + `resolve_gfs_cycle` + `resolve_cmems_layer` (31 passed); canonical docs синхронизированы; `.gitignore` cleanup (DT-15-A); 15.D.3/D.4/15.E перенесены в S16 |
 
 ## Общий прогресс
 
@@ -97,12 +94,14 @@ pie title Прогресс проекта (начало S15)
   "Осталось после S15" : 10
 ```
 
-### In-progress (S15, open 2026-04-22)
-- **DT-14-V** unified `forecast_main.py` CLI — hard-cut old scripts.
-- **DT-14-U** email delivery verification on prod corporate SMTP.
-- **DT-14-T** `.docx` filename convention `Прогноз_{cycle}_{start_date}.docx`.
-- **DT-14-S** `RuntimeWarning: Mean of empty slice` in `collect_wave_data.py`.
-- **DT-14-Y** pipeline exit codes propagation (0/1/2/3/>=10).
+### Открытые DT на вход S16 (по итогам S15)
+- **DT-14-V** unified forecast CLI — **partial:** skeleton + argparse + `msk_to_utc` + `resolve_gfs_cycle` + `resolve_cmems_layer` закрыты в S15 (15.D.1/D.2, `a369afb` + `c656c71`). Остаток: polling loop + integration с downloader-ами + deprecation old scripts — S16 (15.D.3/D.4).
+- **DT-14-U** email delivery verification on prod corporate SMTP — переносится в 15.E (S16); SMTP-реквизиты передаются оператором на входе 15.E.
+- **DT-14-T** `.docx` filename convention `Прогноз_{cycle}_{start_date}.docx` — не трогалось в S15; критический путь до финального merge в master.
+- **DT-14-S** `RuntimeWarning: Mean of empty slice` in `collect_wave_data.py` — не трогалось в S15; остаётся открытым для S16+.
+- **DT-14-Y** pipeline exit codes propagation (0/1/2/3/>=10) — не трогалось в S15; остаётся открытым для S16+.
+- **DT-14-Z** scheduled ingestion + archive rotation — parking lot; перекрывается с ADR-001 on-demand моделью, переоценка после 15.D.3/D.4.
+- **DT-15-A** cleanup untracked debug artifacts — закрыт в 15.F через расширение `.gitignore`.
 
 ## Deferred tasks
 

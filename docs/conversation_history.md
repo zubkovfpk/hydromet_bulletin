@@ -2543,3 +2543,42 @@ Session 14 closed.
 - Конвертация MSK→UTC, вычисление ближайшего GFS-цикла с lag 6h, CMEMS с lag 12h.
 - Polling loop 10 min до availability или таймаут 6 ч.
 - Deprecation-хедеры в forecast_morning.py / forecast_evening.py.
+
+---
+
+## Итоги сессии 15 — 2026-04-22, 13:00–19:00 MSK
+
+### Закрыто в S15
+- **15.A** kickoff docs S15, DoD U+V — коммит `293b0bf`.
+- **15.B** ADR-001 on-demand ingestion (X-variant), 970 lines, 10/10 review-fixes — коммит `0291326`.
+- **15.C** sync canonical docs с решениями S15 и ADR-001 — коммит `82f01cf`.
+- **15.C-fix2** correct ADR-001 filename references (`001-ondemand-ingestion.md`) — коммит `5b08f14`.
+- **15.D.1** forecast_main.py skeleton — argparse + msk_to_utc + 15 passed — коммит `a369afb`.
+- **15.D.2** resolve_gfs_cycle + resolve_cmems_layer — 31 passed — коммит `c656c71`.
+- **15.F** closeout — (текущий коммит).
+
+### Артефакты S15
+- `docs/adr/001-ondemand-ingestion.md` — ADR-001 (on-demand ingestion, X-variant).
+- `forecast_main.py` — единая точка входа; argparse + msk_to_utc + resolve_gfs_cycle + resolve_cmems_layer.
+- `tests/test_forecast_main.py` — 31 passed; покрытие 4 функций + CLI.
+- `.gitignore` — добавлена секция debug-артефактов (DT-15-A).
+
+### Перенесено в S16
+- **15.D.3** polling loop + интеграция с `gfs_downloader` / `cmems_downloader`.
+- **15.D.4** deprecation-хедеры в `forecast_morning.py` / `forecast_evening.py` + обновление `README.md` / `config.example.ini`.
+- **15.E** migration + SMTP prod verify + end-to-end dry-run.
+
+### Parking lot после S15 (унаследовано из S14, не закрывалось в S15)
+- **DT-14-T** `.docx` filename convention — start_date-based.
+- **DT-14-S** `RuntimeWarning: Mean of empty slice` в `collect_wave_data.py`.
+- **DT-14-Y** pipeline exit codes propagation.
+- **DT-14-U** email delivery verification on prod SMTP — переходит в 15.E (S16).
+- **DT-14-V** unified forecast CLI — частично закрыт (skeleton + resolve), ждёт 15.D.3/D.4.
+- **DT-14-Z** scheduled ingestion + archive rotation.
+
+### Уроки S15
+1. Имена файлов из прошлых сессий — только через `git ls-tree`, не по памяти. Повторная ошибка с `ADR-001-on-demand-ingestion.md` → фактическое `001-ondemand-ingestion.md`, исправлено 15.C-fix2.
+2. ID решения (`ADR-001`) и путь к файлу (`docs/adr/001-ondemand-ingestion.md`) — независимые контракты. В коде ссылаемся только на ID (stable), в docs — на путь.
+3. Plain-text FIND перед любой Windsurf-правкой — обязательная верификация с точной индентацией и bullet/backtick префиксами. Сохранило от 2/3 сломанных применений в 15.C.
+4. При добавлении новой gantt-секции нужно удалить старую конкурирующую. Пропуск в 15.C привёл к артефакту 64% прогресса из-за двух параллельных секций S15.
+5. ADR-review после применения обязателен — 10/10 review-fixes в 15.B потребовали двух итераций (5a + 5b) из-за FIND-mismatch на markdown-подсветке.
