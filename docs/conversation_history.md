@@ -2401,6 +2401,44 @@ Session 14 opened. Entry HEAD = `fbda74c` (session 13 closed). Scope: 14.A docs 
 
 ---
 
+### Сессия 14, шаг B — tol_hours=3 code finalization (Windsurf)
+
+- Реализовано нормативное `tol_hours = 3` в `validate_outputs` (константа `NOMINAL_TOL_HOURS`).
+- Цель: зафиксировать допуск к горизонту wave-данных согласно правилам сессии 13.
+
+---
+
+### Сессия 14, шаг C — DT-13-3: dry-run date policy учитывает GFS (Windsurf)
+
+- `_resolve_run_date_for_dry_run` расширен: проверяется совместная доступность CMEMS + GFS, fallback на today-1 при отсутствии GFS за today.
+
+---
+
+### Сессия 14, шаг D — DT-13-4: storage layout migration (Windsurf)
+
+- Meteo-side: дефолтный `results_subdir` мигрирован на `data/storage/gfs` с legacy fallback.
+- Wave-side: CMEMS wave discovery/контракт приведены к `R<run_date>`.
+
+---
+
+### Сессия 14, шаг F — DT-12-2 Part 3: wave temporal semantics split (Windsurf)
+
+- Разделены понятия daily span (24h) и forecast depth (120h) для валидации wave-горизонта.
+
+---
+
+### Сессия 14, шаг H — DT-12-2 Part 4: CMEMS wave contract + NaN/fill decode + nanmean (Windsurf)
+
+- Реализованы: NaN init, decode fill-values, `nanmean`-агрегации; контракт поиска файлов по `R<run_date>`.
+
+---
+
+### Сессия 14, шаг I — statistics imports fix (Windsurf)
+
+- Исправлены импорты статистических модулей в forecast runner.
+
+---
+
 ### Сессия 14 — закрытие (Windsurf)
 
 Session 14 closed.
