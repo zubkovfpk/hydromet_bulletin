@@ -149,7 +149,9 @@ def run_ingest(
     try:
         manifest = read_manifest(MANIFEST_PATH)
     except ManifestCorruptedError as exc:
-        log_event(
+        _safe_log_event(
+            logger,
+            "manifest_update",
             source="gfs",
             event="manifest_update",
             target_cycle=target_cycle_str,
@@ -230,7 +232,9 @@ def _finalize_success(target_cycle_dt: datetime, target_cycle_str: str, logger: 
             logger=logger,
         )
     except ArchiveRotationError as exc:
-        log_event(
+        _safe_log_event(
+            logger,
+            "archive_rotation",
             source="gfs",
             event="archive_rotation",
             target_cycle=target_cycle_str,
@@ -265,7 +269,9 @@ def _finalize_success(target_cycle_dt: datetime, target_cycle_str: str, logger: 
         MANIFEST_PATH.parent.mkdir(parents=True, exist_ok=True)
         _write_manifest_with_config_storage_path(MANIFEST_PATH, manifest)
     except (ManifestCorruptedError, ValueError) as exc:
-        log_event(
+        _safe_log_event(
+            logger,
+            "manifest_update",
             source="gfs",
             event="manifest_update",
             target_cycle=target_cycle_str,
@@ -327,15 +333,34 @@ def main(argv: list[str] | None = None) -> int:
                 logger=logger,
             )
     except Exception as exc:
-        log_event(
-            source="gfs",
-            event="ingest_failed",
-            target_cycle=target_cycle_str,
-            result="unhandled_exception",
-            error_message=str(exc),
-        )
+        try:
+            log_event(
+                source="gfs",
+                event="ingest_failed",
+                target_cycle=target_cycle_str,
+                result="unhandled_exception",
+                error_message=str(exc),
+            )
+        except Exception as log_exc:
+            logger.warning(
+                "failed to log ingest_failed event: %s; original error: %s",
+                log_exc,
+                exc,
+            )
         logger.exception("GFS ingest failed with unhandled exception")
         return 2
+
+
+def _safe_log_event(logger: logging.Logger, event_name: str, **kwargs: object) -> None:
+    """Best-effort error-path logging for ADR-001 §7 event channel failures."""
+    try:
+        log_event(**kwargs)
+    except Exception as log_exc:
+        logger.warning(
+            "failed to log %s event: %s; proceeding with error handling",
+            event_name,
+            log_exc,
+        )
 
 
 def _build_logger() -> logging.Logger:

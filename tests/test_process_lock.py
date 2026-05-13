@@ -1,11 +1,12 @@
 import importlib
+import logging
 import os
 import sys
 from typing import Any, TextIO
 
 import pytest
 
-from utils import event_logger
+import utils.process_lock as process_lock
 from utils.process_lock import ProcessLock
 
 
@@ -42,7 +43,7 @@ def test_process_lock_contention_calls_log_and_exits(monkeypatch, tmp_path):
         exit_codes.append(code)
         raise SystemExit(code)
 
-    monkeypatch.setattr(event_logger, "log_event", fake_log_event)
+    monkeypatch.setattr(process_lock, "log_event", fake_log_event)
     monkeypatch.setattr(sys, "exit", fake_exit)
 
     try:
@@ -55,6 +56,37 @@ def test_process_lock_contention_calls_log_and_exits(monkeypatch, tmp_path):
     assert exc_info.value.code == 0
     assert exit_codes == [0]
     assert log_calls == [{"source": "gfs", "event": "lock_contention", "result": "skipped"}]
+
+
+def test_lock_contention_safe_when_log_event_fails(monkeypatch, tmp_path, caplog):
+    lock_path = tmp_path / ".lock"
+    holder = open(lock_path, "a+", encoding="utf-8")
+    _ensure_lock_byte(holder)
+    _acquire_manual_lock(holder)
+
+    exit_codes: list[int | None] = []
+
+    def fail_log_event(**kwargs: Any) -> None:
+        raise RuntimeError("event log not writable")
+
+    def fake_exit(code: int | None = 0) -> None:
+        exit_codes.append(code)
+        raise SystemExit(code)
+
+    monkeypatch.setattr(process_lock, "log_event", fail_log_event)
+    monkeypatch.setattr(sys, "exit", fake_exit)
+    caplog.set_level(logging.WARNING, logger="utils.process_lock")
+
+    try:
+        with pytest.raises(SystemExit) as exc_info:
+            ProcessLock(str(lock_path)).__enter__()
+    finally:
+        _release_manual_lock(holder)
+        holder.close()
+
+    assert exc_info.value.code == 0
+    assert exit_codes == [0]
+    assert "failed to log lock_contention event" in caplog.text
 
 
 def _ensure_lock_byte(lock_file: TextIO) -> None:

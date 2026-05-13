@@ -377,6 +377,30 @@ def test_main_unhandled_exception_returns_2(monkeypatch, tmp_path):
     ]
 
 
+def test_main_unhandled_exception_log_event_failure_still_returns_2(monkeypatch, tmp_path, caplog):
+    monkeypatch.chdir(tmp_path)
+    test_logger = logging.getLogger("test_ingest_gfs_safe_error")
+    test_logger.handlers.clear()
+    test_logger.propagate = True
+    monkeypatch.setattr(ingest_gfs, "_build_logger", lambda: test_logger)
+
+    def fail_run_ingest(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    def fail_log_event(**kwargs):
+        raise RuntimeError("event log not writable")
+
+    monkeypatch.setattr(ingest_gfs, "run_ingest", fail_run_ingest)
+    monkeypatch.setattr(ingest_gfs, "log_event", fail_log_event)
+    caplog.set_level(logging.WARNING, logger="test_ingest_gfs_safe_error")
+
+    exit_code = ingest_gfs.main(["--cycle", "2026-05-13T12Z"])
+
+    assert exit_code == 2
+    assert "failed to log ingest_failed event" in caplog.text
+    assert "boom" in caplog.text
+
+
 def _manifest(latest_cycle: str | None) -> dict[str, Any]:
     return {
         "schema_version": "1.0",

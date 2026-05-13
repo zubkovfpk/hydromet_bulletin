@@ -26,6 +26,18 @@ def test_dry_run_does_not_call_pipeline(monkeypatch, tmp_path, capsys):
     assert "[dry-run] pipeline plan:" in captured.out
 
 
+def test_dry_run_does_not_create_output_dir(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    _patch_pipeline(monkeypatch)
+
+    exit_code = forecast_main.main(
+        ["--date", "2026-05-14", "--time", "18:00", "--tz", "MSK", "--dry-run"]
+    )
+
+    assert exit_code == 0
+    assert not (tmp_path / "output").exists()
+
+
 def test_real_run_creates_docx_file(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     _patch_pipeline(monkeypatch)

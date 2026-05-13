@@ -228,6 +228,14 @@ def build_output_filename(
     return suffixed_path
 
 
+def _compose_output_path_dry_run(start_dt_utc: datetime, output_dir: Path) -> Path:
+    """Pure output path composition for dry-run; no filesystem side effects."""
+    if start_dt_utc.tzinfo is None:
+        raise ValueError("start_dt_utc must be timezone-aware")
+    start_msk = start_dt_utc.astimezone(MSK_TZ)
+    return output_dir / f"Прогноз_{start_msk:%Y%m%d}_{start_msk:%H%M}.docx"
+
+
 def setup_logging(level_name: str) -> None:
     logging.basicConfig(
         level=getattr(logging, level_name, logging.INFO),
@@ -294,6 +302,16 @@ def _resolve_storage_paths(
                 raise FileNotFoundError(f"manifest CMEMS storage_path does not exist: {cmems_storage_path}")
 
     return gfs_storage_path, cmems_storage_path
+
+
+def _read_manifest_for_run(path: Path, *, dry_run: bool, logger: logging.Logger) -> dict[str, Any]:
+    try:
+        return read_manifest(path)
+    except ManifestCorruptedError as exc:
+        if not dry_run:
+            raise
+        logger.warning("dry-run: manifest is corrupted, continuing with empty manifest: %s", exc)
+        return {"schema_version": "1.0", "updated_at": datetime.now(timezone.utc).isoformat(), "gfs": None, "cmems": None}
 
 
 def _run_pipeline(
@@ -481,13 +499,19 @@ def main(argv: list[str] | None = None) -> int:
         resolved_gfs_cycle = resolve_gfs_cycle(resolved_utc)
         resolved_cmems_layer = resolve_cmems_layer(resolved_utc)
         request_dt_utc = datetime.now(timezone.utc)
-        output_path = build_output_filename(
-            start_dt_utc=resolved_utc,
-            request_dt_utc=request_dt_utc,
-            output_dir=OUTPUT_DIR_DEFAULT,
-            force=args.force,
-        )
-        manifest = read_manifest(MANIFEST_PATH)
+        if args.dry_run:
+            output_path = _compose_output_path_dry_run(
+                start_dt_utc=resolved_utc,
+                output_dir=OUTPUT_DIR_DEFAULT,
+            )
+        else:
+            output_path = build_output_filename(
+                start_dt_utc=resolved_utc,
+                request_dt_utc=request_dt_utc,
+                output_dir=OUTPUT_DIR_DEFAULT,
+                force=args.force,
+            )
+        manifest = _read_manifest_for_run(MANIFEST_PATH, dry_run=args.dry_run, logger=logger)
         _resolve_storage_paths(
             manifest,
             resolved_gfs_cycle,

@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import errno
 import importlib
+import logging
 import os
 import sys
 from types import TracebackType
 from typing import TextIO
 
-from utils import event_logger
+from utils.event_logger import log_event
+
+
+logger = logging.getLogger(__name__)
 
 
 class ProcessLock:
@@ -29,7 +33,13 @@ class ProcessLock:
 
         if not acquired:
             lock_file.close()
-            event_logger.log_event(source="gfs", event="lock_contention", result="skipped")
+            try:
+                log_event(source="gfs", event="lock_contention", result="skipped")
+            except Exception as exc:
+                logger.warning(
+                    "failed to log lock_contention event: %s; proceeding with safe skip",
+                    exc,
+                )
             sys.exit(0)
             raise SystemExit(0)
 
