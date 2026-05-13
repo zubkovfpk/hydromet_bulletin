@@ -104,7 +104,7 @@ def test_run_ingest_success_writes_manifest_and_rotates_archive(monkeypatch, tmp
         write_calls.append((Path(path), data))
 
     monkeypatch.setattr(ingest_gfs, "rotate_archive", fake_rotate_archive)
-    monkeypatch.setattr(ingest_gfs, "write_manifest", fake_write_manifest)
+    monkeypatch.setattr(ingest_gfs, "_write_manifest_with_config_storage_path", fake_write_manifest)
 
     exit_code = ingest_gfs.run_ingest(
         target_cycle,
@@ -122,7 +122,8 @@ def test_run_ingest_success_writes_manifest_and_rotates_archive(monkeypatch, tmp
     assert len(write_calls) == 1
     written_manifest = write_calls[0][1]
     assert written_manifest["gfs"]["latest_successful_cycle"] == "2026-05-13T12Z"
-    assert written_manifest["gfs"]["storage_path"] == "storage/gfs/20260513/12z/"
+    expected_root = str(ingest_gfs.STORAGE_GFS_ROOT).replace("\\", "/").rstrip("/")
+    assert written_manifest["gfs"]["storage_path"] == f"{expected_root}/20260513/12z/"
     assert set(written_manifest["gfs"]["archive_slots"]["24h-back"]) == {"path", "archived_at"}
     assert [(event["event"], event["result"]) for event in events] == [
         ("poll_attempt", "success"),
@@ -253,7 +254,7 @@ def test_run_ingest_write_manifest_value_error_returns_2(monkeypatch, tmp_path):
     def fail_write_manifest(path, data):
         raise ValueError("schema_version invalid")
 
-    monkeypatch.setattr(ingest_gfs, "write_manifest", fail_write_manifest)
+    monkeypatch.setattr(ingest_gfs, "_write_manifest_with_config_storage_path", fail_write_manifest)
 
     exit_code = ingest_gfs.run_ingest(
         target_cycle,

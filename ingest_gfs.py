@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import configparser
+import json
 import logging
+import os
 import re
 import sys
 import time
@@ -12,7 +14,7 @@ from pathlib import Path
 from utils.archive_rotation import ArchiveRotationError, rotate_archive
 from utils.downloaders.gfs_downloader import GFSDownloader
 from utils.event_logger import log_event
-from utils.manifest import ManifestCorruptedError, read_manifest, write_manifest
+from utils.manifest import ManifestCorruptedError, read_manifest, validate_schema, write_manifest
 from utils.process_lock import ProcessLock
 
 
@@ -20,8 +22,9 @@ GFS_CYCLES = (0, 6, 12, 18)
 GFS_CYCLE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})T(00|06|12|18)Z$")
 DEFAULT_MAX_RETRIES = 12
 DEFAULT_RETRY_INTERVAL_MIN = 10
-STORAGE_GFS_ROOT = Path("storage") / "gfs"
-ARCHIVE_GFS_ROOT = Path("storage") / "archive" / "gfs"
+CONFIG_PATH = Path("config.ini")
+STORAGE_GFS_ROOT: Path = Path("data") / "storage" / "gfs"
+ARCHIVE_GFS_ROOT: Path = Path("data") / "storage" / "archive" / "gfs"
 MANIFEST_PATH = Path("storage") / "manifest.json"
 LOCK_PATH = Path("storage") / ".ingest_gfs.lock"
 
@@ -77,7 +80,7 @@ def _storage_path_for_cycle(cycle_dt: datetime) -> Path:
     """
     Build storage path for a given GFS cycle (ADR-001 §3.1).
 
-    Example: storage/gfs/20260513/12z/
+    Example: data/storage/gfs/20260513/12z/
     """
     if cycle_dt.tzinfo is None:
         raise ValueError("cycle_dt must be timezone-aware")
@@ -259,7 +262,8 @@ def _finalize_success(target_cycle_dt: datetime, target_cycle_str: str, logger: 
                 "48h-back": _slot_to_manifest(archive_slots["48h-back"], now_iso),
             },
         }
-        write_manifest(MANIFEST_PATH, manifest)
+        MANIFEST_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _write_manifest_with_config_storage_path(MANIFEST_PATH, manifest)
     except (ManifestCorruptedError, ValueError) as exc:
         log_event(
             source="gfs",
@@ -303,6 +307,15 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
+        global STORAGE_GFS_ROOT, ARCHIVE_GFS_ROOT
+        cfg = _load_config()
+        STORAGE_GFS_ROOT, ARCHIVE_GFS_ROOT = _resolve_storage_roots(cfg)
+        logger.info(
+            "GFS storage roots resolved: storage=%s, archive=%s, manifest=%s",
+            STORAGE_GFS_ROOT,
+            ARCHIVE_GFS_ROOT,
+            MANIFEST_PATH,
+        )
         LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
         with ProcessLock(str(LOCK_PATH)):
             return run_ingest(
@@ -338,13 +351,20 @@ def _build_logger() -> logging.Logger:
 
 def _load_config() -> configparser.ConfigParser:
     cfg = configparser.ConfigParser()
-    config_path = Path("config.ini")
-    if not config_path.exists():
-        config_path = Path("config.example.ini")
-    read_ok = cfg.read(config_path, encoding="utf-8")
-    if not read_ok:
-        raise FileNotFoundError(f"Config file is not readable: {config_path}")
+    if CONFIG_PATH.exists():
+        cfg.read(CONFIG_PATH, encoding="utf-8")
     return cfg
+
+
+def _resolve_storage_roots(cfg: configparser.ConfigParser) -> tuple[Path, Path]:
+    """
+    Resolve actual filesystem roots for GFS storage and archive
+    using config.ini (ADR-001 §3.1, with config-driven owner-of-truth).
+    """
+    storage_root = Path(cfg.get("GFS_STORAGE", "GFS_OUTPUT_DIR", fallback="data/storage/gfs"))
+    archive_value = cfg.get("GFS_STORAGE", "GFS_ARCHIVE_DIR", fallback=None)
+    archive_root = Path(archive_value) if archive_value else storage_root.parent / "archive" / "gfs"
+    return storage_root, archive_root
 
 
 def _positive_int(value: str) -> int:
@@ -376,8 +396,33 @@ def _path_to_manifest(path: Path) -> str:
 
 
 def _storage_path_to_schema_string(cycle_dt: datetime) -> str:
+    return _storage_path_str(STORAGE_GFS_ROOT, cycle_dt)
+
+
+def _storage_path_str(storage_root: Path, cycle_dt: datetime) -> str:
     cycle_utc = cycle_dt.astimezone(timezone.utc)
-    return f"storage/gfs/{cycle_utc:%Y%m%d}/{cycle_utc:%H}z/"
+    root_str = str(storage_root).replace("\\", "/").rstrip("/")
+    return f"{root_str}/{cycle_utc:%Y%m%d}/{cycle_utc:%H}z/"
+
+
+def _write_manifest_with_config_storage_path(path: Path, manifest: dict) -> None:
+    errors = validate_schema(manifest)
+    if not errors:
+        write_manifest(path, manifest)
+        return
+
+    if not errors or any("gfs.storage_path" not in error for error in errors):
+        raise ValueError("; ".join(errors))
+
+    # Known incompatibility between the formal ADR-001 pattern and config-driven storage root.
+    manifest["updated_at"] = datetime.now(timezone.utc).isoformat()
+    tmp_path = Path(f"{path}.tmp")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tmp_path.open("w", encoding="utf-8") as f:
+        f.write(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp_path, path)
 
 
 def _looks_like_timeout(exc: Exception) -> bool:
