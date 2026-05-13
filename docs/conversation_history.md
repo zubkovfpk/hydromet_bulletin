@@ -2582,3 +2582,48 @@ Session 14 closed.
 3. Plain-text FIND перед любой Windsurf-правкой — обязательная верификация с точной индентацией и bullet/backtick префиксами. Сохранило от 2/3 сломанных применений в 15.C.
 4. При добавлении новой gantt-секции нужно удалить старую конкурирующую. Пропуск в 15.C привёл к артефакту 64% прогресса из-за двух параллельных секций S15.
 5. ADR-review после применения обязателен — 10/10 review-fixes в 15.B потребовали двух итераций (5a + 5b) из-за FIND-mismatch на markdown-подсветке.
+
+### Итоги серии 15.D.3 (2026-05-13)
+
+Серия закрыта четырьмя коммитами в `feature/bulletin-generation`:
+
+- `f4c732f` — 15.D.3-1: foundation utils для GFS ingestion
+  (`utils/process_lock.py`, `utils/event_logger.py`, `utils/manifest.py`,
+  `schemas/manifest_v1.json`).
+- `f9fb17a` — 15.D.3-2: `utils/archive_rotation.py`
+  (ADR-001 §3.2, DT-14-Z частично закрыт).
+- `508a4be` — 15.D.3-3: `ingest_gfs.py`
+  (CLI `--cycle / --max-retries / --retry-interval-min / --force / --dry-run`,
+  `resolve_target_cycle()`, polling loop, ProcessLock, read-only manifest skip).
+- `a8cc899` — 15.D.3-4: интеграция `ingest_gfs.py` с
+  `rotate_archive` и `write_manifest`, события
+  `archive_rotation` → `manifest_update` → `ingest_complete`,
+  exit codes 0/2 по ADR-001 §5.1.
+
+**Тесты**
+
+- Новые модули: 13 + 8 + 15 = 36 unit-тестов, все зелёные.
+- Regression subset (foundation + archive + forecast_main): 52 passed.
+- Полный прогон: 147 passed, 4 skipped, 1 xfailed, 1 failed
+  (DT-08-5 known flaky), 1 warning (DT-14-S parking lot).
+
+**Соответствие ADR-001**
+
+- §3.1 storage layout: `storage/gfs/YYYYMMDD/HHz/`.
+- §3.2 archive invariant: max 2 слота, `ArchiveRotationError` при 3+.
+- §4.1 / §13.1 manifest v1.0: блок `gfs` со всеми обязательными полями,
+  `archive_slots` как `null` или `{path, archived_at}`.
+- §5.1 CLI ingest_gfs: контракт аргументов и exit codes выполнен.
+- §7.3 events: `poll_attempt`, `archive_rotation`, `manifest_update`,
+  `ingest_complete`, `ingest_skip`, `ingest_failed`, `lock_contention`.
+- §11 S16→S17 criteria: выполнены на unit-уровне; реальный NOMADS-run
+  остаётся за 15.E.
+
+**Что не закрыто в 15.D.3 и переходит дальше по S16**
+
+- 15.D.4: deprecation `forecast_morning.py` / `forecast_evening.py`,
+  filename-конвенция `.docx` (DT-14-T), обновление `README.md`.
+- 15.E: runtime layout под events volume, SMTP verify (DT-14-U),
+  сквозной dry-run + боевой run.
+- DT-14-V полностью НЕ закрыт: он включает всю S16-задачу унификации
+  forecast runner; здесь закрыта только ingestion-часть Scenario X.

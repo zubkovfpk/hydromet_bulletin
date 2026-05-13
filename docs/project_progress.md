@@ -49,7 +49,7 @@ gantt
     15.D.2 resolve gfs/cmems         :done, 2026-04-22, 1d
     15.F Closeout S15                :done, 2026-04-22, 1d
     section Сессия 16 (интеграция и доставка)
-    15.D.3 polling + integration     :2026-04-23, 1d
+    15.D.3 polling + integration     :done, 2026-05-13, 1d
     15.D.4 deprecation + README      :2026-04-24, 1d
     15.E Migration + SMTP verify     :2026-04-25, 2d
 ```
@@ -337,6 +337,10 @@ filename-конвенция `.docx` и подготовка к боевой emai
   - `utils/archive_rotation.py` (DT-14-Z частично);
   - `ingest_gfs.py` (CLI, polling loop, retries, exit codes);
   - интеграция `ingest_gfs.py` с manifest, archive и events.
+  - **Статус (2026-05-13):** закрыт серией коммитов
+    `f4c732f → f9fb17a → 508a4be → a8cc899`;
+    36 новых unit-тестов; см. «Итоги серии 15.D.3» в
+    `docs/conversation_history.md`.
 - 15.D.4 — deprecation `forecast_morning.py` и `forecast_evening.py`
   (DeprecationWarning, без удаления), filename-конвенция
   `Прогноз_{date}_{HHMM}.docx` + `_req-HHMM` при коллизии (DT-14-T),
