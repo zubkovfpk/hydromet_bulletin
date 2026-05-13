@@ -50,6 +50,27 @@ hydromet_bulletin/
 
 ---
 
+## Architecture
+
+### Scenario X (ADR-001)
+
+```
+[ ingest_gfs.py ] --(storage/gfs/YYYYMMDD/HHz/)-->
+[ storage/manifest.json + ingest_events.jsonl ]
+                                             |
+                                             v
+                                    [ forecast_main.py ]
+                                             |
+                                             v
+                                  Прогноз_YYYYMMDD_HHMM.docx
+```
+
+GFS забирается отдельно через `ingest_gfs.py`; слой forecast не скачивает
+данные напрямую. `forecast_main.py` читает локальный `storage/`/manifest и
+собирает бюллетень по запросу оператора в окне до 19:00 MSK.
+
+---
+
 ## Быстрый старт (первый деплой)
 
 ```bash
@@ -70,6 +91,27 @@ sudo bash scripts/deploy.sh
 # 5. Проверить статус
 bash scripts/status.sh
 ```
+
+---
+
+## CLI Quick Start
+
+### Ingest (GFS)
+
+```bash
+python ingest_gfs.py --cycle 2026-05-13T12Z --max-retries 12 --retry-interval-min 10
+python ingest_gfs.py --dry-run
+```
+
+### Forecast (on-demand)
+
+```bash
+python forecast_main.py --date 2026-05-13 --time 18:00 --tz MSK --dry-run
+```
+
+`forecast_main.py` использует ingestion-данные из локального `storage/` и
+резолвит имя выходного `.docx` по DT-14-T:
+`Прогноз_{YYYYMMDD}_{HHMM}.docx`.
 
 ---
 
@@ -99,6 +141,14 @@ bash scripts/status.sh
 | Вечерний  | 19:00 | 16:00 | `0 16 * * *` |
 
 Изменить расписание: отредактируйте `crontab`, затем `bash scripts/deploy.sh`.
+
+---
+
+## Deprecation Note
+
+`forecast_morning.py` и `forecast_evening.py` deprecated с 15.D.4. Hard-cut
+запланирован на S18 по ADR-001 §11; рекомендуемая замена:
+`ingest_gfs.py` для загрузки GFS и `forecast_main.py` для on-demand генерации.
 
 ---
 

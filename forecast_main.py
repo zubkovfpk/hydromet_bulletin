@@ -11,6 +11,7 @@ import argparse
 import logging
 import sys
 from datetime import date, datetime, time, timedelta, timezone
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 MSK_TZ = ZoneInfo("Europe/Moscow")
@@ -150,6 +151,48 @@ def resolve_cmems_layer(request_time_utc: datetime) -> date:
     return effective.date() - timedelta(days=1)
 
 
+def build_output_filename(
+    start_dt_utc: datetime,
+    request_dt_utc: datetime,
+    output_dir: Path,
+    *,
+    force: bool = False,
+) -> Path:
+    """
+    Build the path for the bulletin .docx file according to DT-14-T / ADR-001 §5.4.
+
+    Base name: 'Прогноз_{YYYYMMDD}_{HHMM}.docx'
+        where YYYYMMDD and HHMM are derived from start_dt_utc
+        converted into MSK (Europe/Moscow).
+    Collision: if the base file exists and force is False,
+        append suffix '_req-{HHMM}' (HHMM from request_dt_utc in MSK).
+        If collision persists even with suffix -> raise FileExistsError.
+    Force: if force is True, return the base path unconditionally
+        (caller is expected to overwrite).
+    """
+    if start_dt_utc.tzinfo is None:
+        raise ValueError("start_dt_utc must be timezone-aware")
+    if request_dt_utc.tzinfo is None:
+        raise ValueError("request_dt_utc must be timezone-aware")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    start_msk = start_dt_utc.astimezone(MSK_TZ)
+    req_msk = request_dt_utc.astimezone(MSK_TZ)
+
+    stem = f"Прогноз_{start_msk.strftime('%Y%m%d')}_{start_msk.strftime('%H%M')}"
+    base_path = output_dir / f"{stem}.docx"
+    if force or not base_path.exists():
+        return base_path
+
+    suffixed_path = output_dir / f"{stem}_req-{req_msk.strftime('%H%M')}.docx"
+    if suffixed_path.exists():
+        raise FileExistsError(
+            "Output filename collision: "
+            f"base path exists ({base_path}) and suffixed path exists ({suffixed_path})"
+        )
+    return suffixed_path
+
+
 def setup_logging(level_name: str) -> None:
     logging.basicConfig(
         level=getattr(logging, level_name, logging.INFO),
@@ -175,8 +218,15 @@ def main(argv: list[str] | None = None) -> int:
         logger.info("Resolved UTC datetime: %s", resolved_utc.isoformat())
         resolved_gfs_cycle = resolve_gfs_cycle(resolved_utc)
         resolved_cmems_layer = resolve_cmems_layer(resolved_utc)
+        output_path = build_output_filename(
+            start_dt_utc=resolved_utc,
+            request_dt_utc=datetime.now(timezone.utc),
+            output_dir=Path("output"),
+            force=False,
+        )
         logger.info("Resolved GFS cycle UTC: %s", resolved_gfs_cycle.isoformat())
         logger.info("Resolved CMEMS layer date: %s", resolved_cmems_layer.isoformat())
+        logger.info("Resolved output filename (DT-14-T): %s", output_path)
 
         if args.dry_run:
             print("[dry-run] forecast_main resolved parameters:")
@@ -190,6 +240,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  cmems_lag: {CMEMS_LAG_HOURS}h")
             print(f"  timeout_minutes: {args.timeout_minutes}")
             print(f"  polling_minutes: {args.polling_minutes}")
+            print(f"  output_filename: {output_path}")
             return 0
 
         logger.warning("resolve_cycles + polling not yet implemented (15.D.2/15.D.3)")

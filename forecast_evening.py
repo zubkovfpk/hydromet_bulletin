@@ -11,6 +11,7 @@ import argparse
 import configparser
 import logging
 import time
+import warnings
 import numpy as np
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -269,6 +270,14 @@ def run_evening(cfg: configparser.ConfigParser,
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    warnings.simplefilter("default", DeprecationWarning)
+    warnings.warn(
+        "forecast_evening.py is deprecated (ADR-001 Scenario X). "
+        "Use 'python forecast_main.py --date <YYYY-MM-DD> --time <HH:MM> --tz MSK'. "
+        "Hard-cut planned for S18.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     parser = argparse.ArgumentParser(description="Вечерний метеобюллетень")
     parser.add_argument("--date",   default=None,         help="Дата YYYYMMDD")
     parser.add_argument("--forecast-hours", type=int, default=None, help="Горизонт прогноза CMEMS в часах")
