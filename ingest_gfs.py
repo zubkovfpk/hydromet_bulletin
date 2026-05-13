@@ -9,10 +9,10 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from utils.archive_rotation import rotate_archive
+from utils.archive_rotation import ArchiveRotationError, rotate_archive
 from utils.downloaders.gfs_downloader import GFSDownloader
 from utils.event_logger import log_event
-from utils.manifest import read_manifest, write_manifest
+from utils.manifest import ManifestCorruptedError, read_manifest, write_manifest
 from utils.process_lock import ProcessLock
 
 
@@ -20,6 +20,8 @@ GFS_CYCLES = (0, 6, 12, 18)
 GFS_CYCLE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})T(00|06|12|18)Z$")
 DEFAULT_MAX_RETRIES = 12
 DEFAULT_RETRY_INTERVAL_MIN = 10
+STORAGE_GFS_ROOT = Path("storage") / "gfs"
+ARCHIVE_GFS_ROOT = Path("storage") / "archive" / "gfs"
 MANIFEST_PATH = Path("storage") / "manifest.json"
 LOCK_PATH = Path("storage") / ".ingest_gfs.lock"
 
@@ -69,6 +71,18 @@ def format_cycle(cycle_dt: datetime) -> str:
     if cycle_utc.hour not in GFS_CYCLES:
         raise ValueError("cycle_dt hour must be one of 00, 06, 12, 18 UTC")
     return cycle_utc.strftime("%Y-%m-%dT%HZ")
+
+
+def _storage_path_for_cycle(cycle_dt: datetime) -> Path:
+    """
+    Build storage path for a given GFS cycle (ADR-001 §3.1).
+
+    Example: storage/gfs/20260513/12z/
+    """
+    if cycle_dt.tzinfo is None:
+        raise ValueError("cycle_dt must be timezone-aware")
+    cycle_utc = cycle_dt.astimezone(timezone.utc)
+    return STORAGE_GFS_ROOT / cycle_utc.strftime("%Y%m%d") / f"{cycle_utc:%H}z"
 
 
 def _attempt_download(
@@ -129,7 +143,19 @@ def run_ingest(
     Returns process exit code: 0 (success or nothing-to-do), 2 (failure).
     """
     target_cycle_str = format_cycle(target_cycle_dt)
-    manifest = read_manifest(MANIFEST_PATH)
+    try:
+        manifest = read_manifest(MANIFEST_PATH)
+    except ManifestCorruptedError as exc:
+        log_event(
+            source="gfs",
+            event="manifest_update",
+            target_cycle=target_cycle_str,
+            result="parse_error",
+            error_message=str(exc),
+        )
+        logger.error("GFS ingest failed: manifest corrupted before polling: %s", exc)
+        return 2
+
     gfs_manifest = manifest.get("gfs")
 
     if (
@@ -163,14 +189,7 @@ def run_ingest(
         )
 
         if result == "success":
-            log_event(
-                source="gfs",
-                event="ingest_complete_stub",
-                target_cycle=target_cycle_str,
-                result="success_pending_manifest",
-            )
-            logger.info("GFS ingest succeeded for %s; manifest update pending next step", target_cycle_str)
-            return 0
+            return _finalize_success(target_cycle_dt, target_cycle_str, logger)
 
         if attempt < max_retries:
             time.sleep(retry_interval_min * 60)
@@ -183,6 +202,91 @@ def run_ingest(
     )
     logger.error("GFS ingest failed for %s: retries exhausted", target_cycle_str)
     return 2
+
+
+def _finalize_success(target_cycle_dt: datetime, target_cycle_str: str, logger: logging.Logger) -> int:
+    """Finalize ADR-001 §5.1 successful GFS ingest with archive, manifest, and events."""
+    storage_path = _storage_path_for_cycle(target_cycle_dt)
+    if not storage_path.exists():
+        log_event(
+            source="gfs",
+            event="ingest_failed",
+            target_cycle=target_cycle_str,
+            result="storage_path_missing",
+            storage_path_written=_path_to_manifest(storage_path),
+        )
+        logger.error("GFS ingest failed for %s: storage path missing: %s", target_cycle_str, storage_path)
+        return 2
+
+    archive_start = time.monotonic()
+    try:
+        archive_slots = rotate_archive(
+            source="gfs",
+            current_storage_path=storage_path,
+            archive_root=ARCHIVE_GFS_ROOT,
+            logger=logger,
+        )
+    except ArchiveRotationError as exc:
+        log_event(
+            source="gfs",
+            event="archive_rotation",
+            target_cycle=target_cycle_str,
+            result="rotation_error",
+            error_message=str(exc),
+        )
+        logger.error("GFS archive rotation failed for %s: %s", target_cycle_str, exc)
+        return 2
+
+    log_event(
+        source="gfs",
+        event="archive_rotation",
+        target_cycle=target_cycle_str,
+        result="success",
+        duration_ms=_elapsed_ms(archive_start),
+    )
+
+    manifest_start = time.monotonic()
+    try:
+        manifest = read_manifest(MANIFEST_PATH)
+        now_iso = datetime.now(timezone.utc).isoformat()
+        manifest["gfs"] = {
+            "latest_successful_cycle": target_cycle_str,
+            "latest_successful_fetched_at": now_iso,
+            "latest_successful_source_timestamp": None,
+            "storage_path": _storage_path_to_schema_string(target_cycle_dt),
+            "archive_slots": {
+                "24h-back": _slot_to_manifest(archive_slots["24h-back"], now_iso),
+                "48h-back": _slot_to_manifest(archive_slots["48h-back"], now_iso),
+            },
+        }
+        write_manifest(MANIFEST_PATH, manifest)
+    except (ManifestCorruptedError, ValueError) as exc:
+        log_event(
+            source="gfs",
+            event="manifest_update",
+            target_cycle=target_cycle_str,
+            result="parse_error",
+            error_message=str(exc),
+        )
+        logger.error("GFS manifest update failed for %s: %s", target_cycle_str, exc)
+        return 2
+
+    log_event(
+        source="gfs",
+        event="manifest_update",
+        target_cycle=target_cycle_str,
+        result="success",
+        duration_ms=_elapsed_ms(manifest_start),
+    )
+    log_event(
+        source="gfs",
+        event="ingest_complete",
+        target_cycle=target_cycle_str,
+        result="success",
+        storage_path_written=_storage_path_to_schema_string(target_cycle_dt),
+    )
+    logger.info("GFS ingest completed for %s", target_cycle_str)
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -261,12 +365,23 @@ def _elapsed_ms(start: float) -> int:
     return int((time.monotonic() - start) * 1000)
 
 
+def _slot_to_manifest(path: Path | None, archived_at: str) -> dict[str, str] | None:
+    if path is None:
+        return None
+    return {"path": _path_to_manifest(path), "archived_at": archived_at}
+
+
+def _path_to_manifest(path: Path) -> str:
+    return str(path).replace("\\", "/")
+
+
+def _storage_path_to_schema_string(cycle_dt: datetime) -> str:
+    cycle_utc = cycle_dt.astimezone(timezone.utc)
+    return f"storage/gfs/{cycle_utc:%Y%m%d}/{cycle_utc:%H}z/"
+
+
 def _looks_like_timeout(exc: Exception) -> bool:
     return "timeout" in exc.__class__.__name__.lower() or "timed out" in str(exc).lower()
-
-
-def _future_step_dependencies() -> tuple[object, object]:
-    return write_manifest, rotate_archive
 
 
 if __name__ == "__main__":
