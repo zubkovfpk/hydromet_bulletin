@@ -2766,3 +2766,76 @@ Session 14 closed.
   (0 / 1 / 2 / 3 / 10).
 - SMTP verify run на корпоративном сервере (DT-14-U).
 - Один сквозной dry-run + один боевой run по плану S16.
+
+### Итоги 15.E.2 (2026-05-14)
+
+Серия закрыта тремя коммитами в `feature/bulletin-generation`:
+
+- `4083d37` — 15.E.2: email layer + DT-14-Y exit codes
+  (`forecast_main.py` подключает `utils.email_sender.send_bulletin(...)`;
+  exit codes 0/1/2/3/10; 9 новых тестов).
+- `03c7969` — 15.E.2-fix: storage roots для `ingest_gfs.py` теперь
+  читаются из `config.ini` (`[GFS_STORAGE].GFS_OUTPUT_DIR` +
+  `GFS_ARCHIVE_DIR`, fallback `data/storage/gfs` /
+  `data/storage/archive/gfs`); локальный guard вокруг
+  `validate_schema(...)` для `gfs.storage_path`-паттерна.
+- `7ac7aae` — 15.E.2-robustness:
+  `ProcessLock` contention всегда уходит в `sys.exit(0)`;
+  `ingest_gfs.main()` верхний except — best-effort `log_event`;
+  `forecast_main --dry-run` больше не создаёт `output/`;
+  dry-run tolerant к corrupted manifest.
+
+**Тесты**
+
+- 9 новых тестов в `tests/test_forecast_main_email.py` (15.E.2).
+- 3 новых теста в 15.E.2-robustness:
+  `test_process_lock.py::test_lock_contention_safe_when_log_event_fails`,
+  `test_ingest_gfs_cli.py::test_main_unhandled_exception_log_event_failure_still_returns_2`,
+  `test_forecast_main_pipeline.py::test_dry_run_does_not_create_output_dir`.
+- Subset (process_lock + event_logger + manifest_utils +
+  archive_rotation + ingest_gfs_cli + forecast_main +
+  forecast_main_pipeline + forecast_main_email + filename +
+  deprecated): 97 passed.
+- Полный pytest: 177 passed, 4 skipped, 1 xfailed,
+  1 failed (DT-08-5 known flaky),
+  1 warning (DT-14-S parking lot).
+
+**End-to-end на NOMADS**
+
+- `ingest_gfs.py --cycle 2026-05-13T06Z`: exit 0.
+- `storage/manifest.json` записан валидно с точки зрения
+  пишущей стороны; `ingest_events/ingest_events.jsonl` накапливает
+  события согласно ADR-001 §7.3.
+- `forecast_main.py` на той же дате/времени завершился exit 2
+  (ingestion_missing) из-за расхождения между фактическим
+  `manifest.gfs.storage_path` и regex `^storage/gfs/...`
+  в `schemas/manifest_v1.json` + `utils.manifest.validate_schema`.
+
+**Соответствие ADR-001 / DT**
+
+- ADR-001 §2 / §5 / §11: forecast runner (`forecast_main.py`)
+  собирает `.docx` и опционально шлёт email согласно
+  CLI-контракту (`--no-email`, `--dry-run`, `--force`).
+- ADR-001 §7: events `poll_attempt`, `archive_rotation`,
+  `manifest_update`, `ingest_complete`, `ingest_failed`,
+  `lock_contention` пишутся в JSONL; лог-канал не имеет
+  права ломать штатные exit codes (15.E.2-robustness).
+- ADR-001 §13.1: regex `gfs.storage_path` не совпал с фактическим
+  каноном из `config.ini`. Решение временное (локальный guard),
+  выравнивание контракта — в S17.
+- DT-14-Y: closed (15.E.2, `4083d37`).
+- DT-14-V: near-complete (final on S16 docs closeout, 15.E.3).
+- DT-14-U: deferred (S17.1 prerequisite: единый storage canon
+  + manifest contract alignment; затем manual SMTP verify run).
+- DT-14-Z: closed (15.D.3-2, `f9fb17a`; семантика порядка
+  ротации зафиксирована для пересмотра в DT-16-2).
+- DT-14-S: parking lot, без изменений.
+
+**Что не закрыто в 15.E.2 и переходит в 15.E.3 / S17**
+
+- Финализация Scenario X в `docs/project_context.md` (15.E.3).
+- README cleanup (DT-16-5, 15.E.3).
+- Storage canon + manifest contract (DT-16-1, S17.1).
+- Archive rotation semantics (DT-16-2, S17.1).
+- forecast_main start_time ceil (DT-16-3, S17.2).
+- strict-manifest mode (DT-16-4, S17.2).

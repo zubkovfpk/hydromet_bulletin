@@ -95,13 +95,18 @@ pie title Прогресс проекта (начало S15)
 ```
 
 ### Открытые DT на вход S16 (по итогам S15)
-- **DT-14-V** unified forecast CLI — **in progress (15.E.1, `5dc9a41`)**: skeleton + argparse + `msk_to_utc` + `resolve_gfs_cycle` + `resolve_cmems_layer` закрыты в S15; ingestion + deprecation закрыты в 15.D.3/D.4; pipeline glue + `.docx` закрыты в 15.E.1. Остаток: email-слой + exit codes + dry-run/prod run — 15.E.2/E.3.
-- **DT-14-U** email delivery verification on prod corporate SMTP — переносится в 15.E (S16); SMTP-реквизиты передаются оператором на входе 15.E.
+- **DT-14-V** unified forecast CLI — **near-complete (final on S16 closeout)**: skeleton + argparse + `msk_to_utc` + `resolve_gfs_cycle` + `resolve_cmems_layer` закрыты в S15; ingestion + deprecation закрыты в 15.D.3/D.4; pipeline glue + `.docx` закрыты в 15.E.1; email-слой + exit codes закрыты в 15.E.2. Финальная пометка — 15.E.3.
+- **DT-14-U** email delivery verification on prod corporate SMTP — **deferred (S17.1 prerequisite + manual verify)**.
 - **DT-14-T** `.docx` filename convention `Прогноз_{cycle}_{start_date}.docx` — **closed (15.D.4, `526e549`)**.
 - **DT-14-S** `RuntimeWarning: Mean of empty slice` in `collect_wave_data.py` — не трогалось в S15; остаётся открытым для S16+.
-- **DT-14-Y** pipeline exit codes propagation (0/1/2/3/>=10) — не трогалось в S15; остаётся открытым для S16+.
-- **DT-14-Z** scheduled ingestion + archive rotation — parking lot; перекрывается с ADR-001 on-demand моделью, переоценка после 15.D.3/D.4.
+- **DT-14-Y** pipeline exit codes propagation (0/1/2/3/>=10) — **closed (15.E.2, `4083d37`)**.
+- **DT-14-Z** scheduled ingestion + archive rotation — **closed (15.D.3-2, `f9fb17a`; semantics → DT-16-2)**.
 - **DT-15-A** cleanup untracked debug artifacts — закрыт в 15.F через расширение `.gitignore`.
+- **DT-16-1** manifest.gfs.storage_path contract alignment — **open (S17.1)**.
+- **DT-16-2** archive rotation semantics (before vs after download) — **open (S17.1)**.
+- **DT-16-3** forecast_main start_time ceil per ADR-001 — **open (S17.2)**.
+- **DT-16-4** strict-manifest mode in forecast_main — **open (S17.2)**.
+- **DT-16-5** README cleanup of legacy operational commands — **open (15.E.3)**.
 
 ## Deferred tasks
 
@@ -355,6 +360,15 @@ filename-конвенция `.docx` и подготовка к боевой emai
     9 новых unit-тестов; пайплайн `forecast_main.py` пишет `.docx`,
     email-слой остаётся на 15.E.2; см. «Итоги 15.E.1» в
     `docs/conversation_history.md`.
+  - **Статус (2026-05-14):** 15.E.2 закрыт серией коммитов
+    `4083d37 → 03c7969 → 7ac7aae`;
+    email-слой подключён, exit codes 0/1/2/3/10 по DT-14-Y;
+    storage roots `ingest_gfs.py` теперь из `config.ini`;
+    `ProcessLock` / `ingest_gfs.main` / `forecast_main --dry-run`
+    устойчивы к недоступному event log;
+    ingestion end-to-end на NOMADS подтверждён (`2026-05-13T06Z`);
+    SMTP verify (DT-14-U) deferred в S17.1;
+    см. «Итоги 15.E.2» в `docs/conversation_history.md`.
 
 **DoD сессии (критерии перехода S16→S17)**
 
