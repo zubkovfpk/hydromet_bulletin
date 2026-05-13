@@ -292,3 +292,78 @@ pie title Прогресс проекта (начало S15)
 **DT-13-6 (audit):** сценарий C подтверждён (ключи мёртвые), принято решение B (оставить как legacy/reserved с пометкой в docs).
 
 **Branch architecture audit:** verdict A (status quo: ingestion + bulletin в `feature/bulletin-generation` до отдельного рефакторинга).
+
+## Сессия 15 — адаптация под ADR-001 и on-demand сценарий
+
+```mermaid
+gantt
+    title Сессия 15 — переход к Scenario X (ADR-001)
+    dateFormat  YYYY-MM-DD
+
+    section Документация и архитектура
+    15.C ADR-001 + docs sync          :done, 2026-04-22, 0.5d
+    15.C-fix2 ADR filename references :done, 2026-04-22, 0.5d
+
+    section Forecast runner (Scenario X)
+    15.D.1 forecast_main skeleton     :done, 2026-04-22, 0.5d
+    15.D.2 resolve_gfs/cmems helpers  :done, 2026-04-22, 0.5d
+
+    section Parking lot / перенос в S16+
+    DT-14-V/T/U/S/Y/Z                 :active, 2026-04-22, 1d
+```
+
+**Итоги Сессии 15 (сводка):**
+
+- ADR-001 (on-demand ingestion, Scenario X) согласован и оформлен в `docs/adr/001-ondemand-ingestion.md`; sync с canonical docs завершён.
+- Реализован `forecast_main.py` (CLI, MSK→UTC, dry-run) и вспомогательные функции `resolve_gfs_cycle` и `resolve_cmems_layer`; unit-тесты (31 passed) подтверждают контракт.
+- Branch-policy и правила canonical docs перенесены в `docs/project_context.md` и `windsurf.rules.md`.
+- DT-14-V/T/U/S/Y/Z не закрыты в S15 и перенесены в backlog S16+ (ingestion GFS/CMEMS, filename-конвенция .docx, exit codes, SMTP verify).
+
+## Сессия 16 — план
+
+**Дата старта:** 2026-05-13 (после паузы по причине внешних обязательств; продолжение работы по Scenario X из ADR-001).
+
+**Цель сессии**
+
+Закрыть переход к Scenario X на уровне ingestion-слоя и доставки:
+полноценный `ingest_gfs.py` (polling + manifest + events + archive rotation),
+deprecation старых `forecast_morning.py` / `forecast_evening.py`,
+filename-конвенция `.docx` и подготовка к боевой email-доставке.
+
+**Состав задач**
+
+- 15.D.3 — реализация GFS-ingestion слоя по ADR-001 §3/§4/§5/§7:
+  - foundation: `utils/process_lock.py`, `utils/event_logger.py`, `utils/manifest.py`, `schemas/manifest_v1.json`;
+  - `utils/archive_rotation.py` (DT-14-Z частично);
+  - `ingest_gfs.py` (CLI, polling loop, retries, exit codes);
+  - интеграция `ingest_gfs.py` с manifest, archive и events.
+- 15.D.4 — deprecation `forecast_morning.py` и `forecast_evening.py`
+  (DeprecationWarning, без удаления), filename-конвенция
+  `Прогноз_{date}_{HHMM}.docx` + `_req-HHMM` при коллизии (DT-14-T),
+  обновление `README.md` под Scenario X.
+- 15.E — runtime layout под events volume,
+  SMTP verify на корпоративном сервере (DT-14-U),
+  один сквозной dry-run и один боевой run.
+
+**DoD сессии (критерии перехода S16→S17)**
+
+- `ingest_gfs.py` успешно отрабатывает на реальном NOMADS.
+- `storage/manifest.json` содержит валидный `gfs`-блок по схеме v1.0.
+- `ingest_events.jsonl` накапливает события ingest по ADR-001 §7.
+- Archive rotation соблюдает инвариант ADR-001 §3.2.
+- `forecast_morning.py` и `forecast_evening.py` помечены deprecated,
+  но ещё не удалены (hard-cut остаётся на S18 по ADR-001).
+
+**Parking lot S16 → S17+**
+
+- DT-14-S (RuntimeWarning Mean of empty slice в wave nanmean).
+- DT-14-Y (exit code propagation на уровне runner / cron bridge).
+- DT-08-1..4, DT-08-6, DT-08-7 (logging hygiene, shapefiledir keyword-only).
+- DT-13-6 (full config cleanup, sweep по legacy-keys).
+- DT-10-5 (build_mask оптимизация).
+
+**Связь с canonical контрактами**
+
+- ADR-001 (`docs/adr/001-ondemand-ingestion.md`): §3 storage/archive,
+  §4 manifest v1.0, §5 CLI ingest_gfs, §7 events, §11 критерии S16→S17.
+- `docs/project_context.md`, раздел 9: текущие открытые DT и их DoD.
