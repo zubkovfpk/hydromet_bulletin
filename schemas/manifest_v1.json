@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hydromet.local/schemas/manifest_v1.json",
+  "title": "Hydromet ingestion manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "updated_at", "gfs", "cmems"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "updated_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|\\+00:00)$"
+    },
+    "gfs": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/gfs_manifest"}
+      ]
+    },
+    "cmems": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/cmems_manifest"}
+      ]
+    }
+  },
+  "$defs": {
+    "archive_slots": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["24h-back", "48h-back"],
+      "properties": {
+        "24h-back": {
+          "oneOf": [
+            {"type": "object"},
+            {"type": "null"}
+          ]
+        },
+        "48h-back": {
+          "oneOf": [
+            {"type": "object"},
+            {"type": "null"}
+          ]
+        }
+      }
+    },
+    "gfs_manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "latest_successful_cycle",
+        "latest_successful_fetched_at",
+        "latest_successful_source_timestamp",
+        "storage_path",
+        "archive_slots"
+      ],
+      "properties": {
+        "latest_successful_cycle": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T(00|06|12|18)Z$"
+        },
+        "latest_successful_fetched_at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|\\+00:00)$"
+        },
+        "latest_successful_source_timestamp": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|\\+00:00)$"
+            },
+            {"type": "null"}
+          ]
+        },
+        "storage_path": {
+          "type": "string",
+          "pattern": "^storage/gfs/\\d{8}/(00z|06z|12z|18z)/$"
+        },
+        "archive_slots": {
+          "$ref": "#/$defs/archive_slots"
+        }
+      }
+    },
+    "cmems_manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "latest_successful_layer_date",
+        "latest_successful_fetched_at",
+        "latest_successful_source_timestamp",
+        "storage_path",
+        "archive_slots"
+      ],
+      "properties": {
+        "latest_successful_layer_date": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+        },
+        "latest_successful_fetched_at": {
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|\\+00:00)$"
+        },
+        "latest_successful_source_timestamp": {
+          "oneOf": [
+            {
+              "type": "string",
+              "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|\\+00:00)$"
+            },
+            {"type": "null"}
+          ]
+        },
+        "storage_path": {
+          "type": "string",
+          "pattern": "^storage/cmems/\\d{8}/$"
+        },
+        "archive_slots": {
+          "$ref": "#/$defs/archive_slots"
+        }
+      }
+    }
+  }
+}
