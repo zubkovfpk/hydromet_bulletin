@@ -2688,3 +2688,81 @@ Session 14 closed.
 - Использование `output_filename` совместно с `force` из CLI.
 - SMTP verify (DT-14-U) и runtime layout `ingest_events/`.
 - Один сквозной dry-run + один боевой run по плану S16.
+
+### Итоги 15.E.1 (2026-05-14)
+
+Шаг закрыт коммитом `5dc9a41`
+(`feat(forecast): glue pipeline + write .docx in forecast_main.py`)
+в `feature/bulletin-generation`.
+
+**Что сделано**
+
+- `forecast_main.py`:
+  - добавлены CLI-флаги `--no-email` (no-op в 15.E.1) и `--force`
+    (передаётся в `build_output_filename(...)` для контроля
+    перезаписи и коллизий `_req-HHMM`);
+  - read-only чтение `storage/manifest.json` через
+    `utils.manifest.read_manifest`;
+  - `_resolve_storage_paths(...)`:
+    - WARN при `manifest.gfs.latest_successful_cycle` != resolved
+      `gfs_cycle` и при mismatch CMEMS layer date,
+    - silent fallback при отсутствии блоков GFS/CMEMS
+      (легитимный first-run сценарий);
+  - `_run_pipeline(...)` — склейка существующих утилит без
+    изменения их API:
+    `collect_meteo_data(run_date=..., cycle=...)`
+    → `collect_wave_data(run_date=...)`
+    → `assert_valid_for_bulletin(...)`
+    → `wind_statistics` / `precip_statistics` /
+      `temp_statistics_morning`
+    → `create_bulletin_doc` (как `build_doc(...)`);
+  - в `--dry-run` печатается блок `pipeline plan:` и
+    строка `output_filename: <path>`; реальных вызовов и
+    записи на диск нет;
+  - в реальном запуске пишется `.docx` по пути из
+    `build_output_filename(..., force=args.force)` из 15.D.4;
+  - exit codes: `0` — success, `1` — любая необработанная
+    ошибка; полная классификация DT-14-Y отложена в 15.E.2.
+- Email-слой и SMTP в этом шаге не подключены
+  (`utils/email_sender.py` не импортируется).
+
+**Тесты**
+
+- `tests/test_forecast_main_pipeline.py` — 9 passed:
+  dry-run без вызовов и записи на диск, real-run пишет `.docx`,
+  `--force` перезаписывает существующий файл, коллизия без
+  `--force` уходит в `_req-HHMM`, `--no-email` принимается и
+  логируется, необработанное исключение → exit 1, пути из
+  manifest логируются при наличии блоков, WARN при cycle/date
+  mismatch, тишина при отсутствии manifest.
+- Подвыборка (forecast_main_pipeline + forecast_main + filename +
+  deprecated + ingest_gfs_cli + foundation + archive) — 85 passed.
+- Полный pytest — 165 passed, 4 skipped, 1 xfailed,
+  1 failed (DT-08-5 known flaky), 1 warning (DT-14-S parking lot).
+
+**Соответствие ADR-001 / DT**
+
+- ADR-001 §5: `forecast_main.py` теперь является runner'ом
+  Scenario X (CLI + pipeline + .docx), хотя без email
+  (15.E.2 закрывает оставшуюся часть).
+- ADR-001 §8: контракт `validate_outputs.assert_valid_for_bulletin(...)`
+  использован как есть, без изменения API.
+- ADR-001 §11: критерии S16→S17 теперь дополнительно подкреплены
+  тем, что `forecast_main.py` доходит до записи `.docx`
+  на unit-уровне (через мокированные `utils/*`).
+- DT-14-V (унификация forecast runner): **in progress**,
+  частично закрыт 15.E.1 (pipeline glue + .docx); полное
+  закрытие — на closeout S16 после 15.E.3.
+- DT-14-U (SMTP verify), DT-14-Y (exit codes): остаются
+  открытыми, переходят в 15.E.2.
+- DT-14-S, DT-08-*, DT-13-6 — parking lot, не трогали.
+
+**Что не закрыто в 15.E.1 и переходит в 15.E.2**
+
+- Подключение `utils/email_sender.py` и реальная отправка
+  бюллетеня по SMTP из `config.ini` (`recipient_emails`
+  используются как есть, без правок кода).
+- Полная классификация exit codes по DT-14-Y
+  (0 / 1 / 2 / 3 / 10).
+- SMTP verify run на корпоративном сервере (DT-14-U).
+- Один сквозной dry-run + один боевой run по плану S16.

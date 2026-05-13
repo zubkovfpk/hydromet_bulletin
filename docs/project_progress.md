@@ -95,7 +95,7 @@ pie title Прогресс проекта (начало S15)
 ```
 
 ### Открытые DT на вход S16 (по итогам S15)
-- **DT-14-V** unified forecast CLI — **partial:** skeleton + argparse + `msk_to_utc` + `resolve_gfs_cycle` + `resolve_cmems_layer` закрыты в S15 (15.D.1/D.2, `a369afb` + `c656c71`). Остаток: polling loop + integration с downloader-ами + deprecation old scripts — S16 (15.D.3/D.4).
+- **DT-14-V** unified forecast CLI — **in progress (15.E.1, `5dc9a41`)**: skeleton + argparse + `msk_to_utc` + `resolve_gfs_cycle` + `resolve_cmems_layer` закрыты в S15; ingestion + deprecation закрыты в 15.D.3/D.4; pipeline glue + `.docx` закрыты в 15.E.1. Остаток: email-слой + exit codes + dry-run/prod run — 15.E.2/E.3.
 - **DT-14-U** email delivery verification on prod corporate SMTP — переносится в 15.E (S16); SMTP-реквизиты передаются оператором на входе 15.E.
 - **DT-14-T** `.docx` filename convention `Прогноз_{cycle}_{start_date}.docx` — **closed (15.D.4, `526e549`)**.
 - **DT-14-S** `RuntimeWarning: Mean of empty slice` in `collect_wave_data.py` — не трогалось в S15; остаётся открытым для S16+.
@@ -351,6 +351,10 @@ filename-конвенция `.docx` и подготовка к боевой emai
 - 15.E — runtime layout под events volume,
   SMTP verify на корпоративном сервере (DT-14-U),
   один сквозной dry-run и один боевой run.
+  - **Статус (2026-05-14):** 15.E.1 закрыт коммитом `5dc9a41`;
+    9 новых unit-тестов; пайплайн `forecast_main.py` пишет `.docx`,
+    email-слой остаётся на 15.E.2; см. «Итоги 15.E.1» в
+    `docs/conversation_history.md`.
 
 **DoD сессии (критерии перехода S16→S17)**
 
