@@ -2627,3 +2627,64 @@ Session 14 closed.
   сквозной dry-run + боевой run.
 - DT-14-V полностью НЕ закрыт: он включает всю S16-задачу унификации
   forecast runner; здесь закрыта только ingestion-часть Scenario X.
+
+### Итоги 15.D.4 (2026-05-13)
+
+Шаг закрыт коммитом `526e549`
+(`feat(forecast): deprecation + DT-14-T filename + README sync`)
+в `feature/bulletin-generation`.
+
+**Что сделано**
+
+- `forecast_main.py`:
+  - добавлена функция
+    `build_output_filename(start_dt_utc, request_dt_utc, output_dir, *, force)`
+    по ADR-001 §5.4 (DT-14-T):
+    - базовое имя `Прогноз_{YYYYMMDD}_{HHMM}.docx` (MSK от `start_dt_utc`),
+    - при коллизии без `force` — суффикс `_req-{HHMM}` (MSK от `request_dt_utc`),
+    - двойная коллизия → `FileExistsError`,
+    - `force=True` возвращает базовый путь без проверки;
+  - в dry-run выводится строка `output_filename: <path>`;
+  - реальная запись `.docx` отложена в 15.E.
+- `forecast_morning.py` / `forecast_evening.py`:
+  - в начале `__main__`-блока добавлены
+    `warnings.simplefilter("default", DeprecationWarning)` и
+    `warnings.warn(..., DeprecationWarning, stacklevel=2)` со
+    ссылкой на `forecast_main.py` и ADR-001;
+  - алгоритмика и контракты модулей не менялись;
+  - hard-cut запланирован на S18 (ADR-001 §11).
+- `README.md`:
+  - синхронизированы три зоны под Scenario X:
+    Architecture (ASCII-схема ingest → manifest → forecast → .docx),
+    CLI Quick Start (ingest_gfs + forecast_main),
+    Deprecation Note для legacy-скриптов.
+
+**Тесты**
+
+- `tests/test_filename_convention.py` — 7 passed
+  (no-collision, collision, double collision, force, tz-aware
+  guard, day-boundary MSK, dry-run prints output_filename).
+- `tests/test_legacy_scripts_deprecated.py` — 2 passed
+  (наличие `DeprecationWarning` в обоих legacy-скриптах с
+  упоминанием ADR-001 и `forecast_main.py`).
+- Regression subset (forecast_main + ingest_gfs_cli + foundation
+  + archive) — 67 passed.
+- Полный pytest — 156 passed, 4 skipped, 1 xfailed,
+  1 failed (DT-08-5 known flaky), 1 warning (DT-14-S parking lot).
+
+**Соответствие ADR-001 / DT**
+
+- ADR-001 §5.4: filename-конвенция реализована и покрыта тестами.
+- ADR-001 §11: deprecation path для legacy-скриптов теперь виден
+  при их запуске; hard-cut остаётся на S18.
+- DT-14-T: закрыт в 15.D.4 (`526e549`).
+- DT-14-V (унификация forecast runner): полностью закрывается
+  только на closeout всей S16, после 15.E.
+- DT-14-S, DT-14-Y, DT-08-* — parking lot, не трогали.
+
+**Что не закрыто в 15.D.4 и переходит в 15.E**
+
+- Реальная запись `.docx` и сборка пайплайна в `forecast_main.py`.
+- Использование `output_filename` совместно с `force` из CLI.
+- SMTP verify (DT-14-U) и runtime layout `ingest_events/`.
+- Один сквозной dry-run + один боевой run по плану S16.

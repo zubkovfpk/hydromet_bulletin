@@ -50,7 +50,7 @@ gantt
     15.F Closeout S15                :done, 2026-04-22, 1d
     section Сессия 16 (интеграция и доставка)
     15.D.3 polling + integration     :done, 2026-05-13, 1d
-    15.D.4 deprecation + README      :2026-04-24, 1d
+    15.D.4 deprecation + README      :done, 2026-05-13, 1d
     15.E Migration + SMTP verify     :2026-04-25, 2d
 ```
 
@@ -97,7 +97,7 @@ pie title Прогресс проекта (начало S15)
 ### Открытые DT на вход S16 (по итогам S15)
 - **DT-14-V** unified forecast CLI — **partial:** skeleton + argparse + `msk_to_utc` + `resolve_gfs_cycle` + `resolve_cmems_layer` закрыты в S15 (15.D.1/D.2, `a369afb` + `c656c71`). Остаток: polling loop + integration с downloader-ами + deprecation old scripts — S16 (15.D.3/D.4).
 - **DT-14-U** email delivery verification on prod corporate SMTP — переносится в 15.E (S16); SMTP-реквизиты передаются оператором на входе 15.E.
-- **DT-14-T** `.docx` filename convention `Прогноз_{cycle}_{start_date}.docx` — не трогалось в S15; критический путь до финального merge в master.
+- **DT-14-T** `.docx` filename convention `Прогноз_{cycle}_{start_date}.docx` — **closed (15.D.4, `526e549`)**.
 - **DT-14-S** `RuntimeWarning: Mean of empty slice` in `collect_wave_data.py` — не трогалось в S15; остаётся открытым для S16+.
 - **DT-14-Y** pipeline exit codes propagation (0/1/2/3/>=10) — не трогалось в S15; остаётся открытым для S16+.
 - **DT-14-Z** scheduled ingestion + archive rotation — parking lot; перекрывается с ADR-001 on-demand моделью, переоценка после 15.D.3/D.4.
@@ -345,6 +345,9 @@ filename-конвенция `.docx` и подготовка к боевой emai
   (DeprecationWarning, без удаления), filename-конвенция
   `Прогноз_{date}_{HHMM}.docx` + `_req-HHMM` при коллизии (DT-14-T),
   обновление `README.md` под Scenario X.
+  - **Статус (2026-05-13):** закрыт коммитом `526e549`;
+    9 новых unit-тестов (7 filename + 2 deprecated);
+    см. «Итоги 15.D.4» в `docs/conversation_history.md`.
 - 15.E — runtime layout под events volume,
   SMTP verify на корпоративном сервере (DT-14-U),
   один сквозной dry-run и один боевой run.
