@@ -8,6 +8,7 @@ replace `forecast_morning.py` / `forecast_evening.py`.
 from __future__ import annotations
 
 import argparse
+import configparser
 import logging
 import sys
 from datetime import date, datetime, time, timedelta, timezone
@@ -20,10 +21,10 @@ import numpy as np
 from utils.collect_meteo_data import collect_meteo_data
 from utils.collect_wave_data import collect_wave_data
 from utils.doc_builder import create_bulletin_doc as build_doc
-from utils.manifest import read_manifest
+from utils.manifest import ManifestCorruptedError, read_manifest
 from utils.precip_statistics import precip_statistics
 from utils.temp_statistics import temp_statistics_morning as temp_statistics
-from utils.validate_outputs import NOMINAL_TOL_HOURS, assert_valid_for_bulletin
+from utils.validate_outputs import NOMINAL_TOL_HOURS, ValidationError, assert_valid_for_bulletin
 from utils.wind_statistics import wind_statistics
 
 MSK_TZ = ZoneInfo("Europe/Moscow")
@@ -36,9 +37,15 @@ GFS_CYCLES_UTC = (0, 6, 12, 18)
 CMEMS_RELEASE_HOUR_UTC = 12
 OUTPUT_DIR_DEFAULT = Path("output")
 MANIFEST_PATH = Path("storage") / "manifest.json"
+CONFIG_PATH = Path("config.ini")
 DEFAULT_FORECAST_HOURS = 120
 
 logger = logging.getLogger(__name__)
+email_sender: Any | None = None
+
+
+class _EmailDeliveryError(Exception):
+    """Raised when forecast_main.py fails to deliver the bulletin via email (ADR-001 §2)."""
 
 
 def _bounded_int(value: str, *, minimum: int, maximum: int, field_name: str) -> int:
@@ -90,16 +97,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="Print resolved parameters and pipeline plan, then exit.",
+        help=(
+            "Dry-run: resolve parameters, log pipeline plan, do NOT call processing "
+            "utilities, do NOT write .docx, do NOT send email."
+        ),
     )
     parser.add_argument(
         "--no-email",
         action="store_true",
-        help=(
-            "Build bulletin but skip email delivery. In 15.E.1 this flag is "
-            "effectively a no-op (email is added in 15.E.2), but accepted "
-            "to keep CLI stable."
-        ),
+        help="Skip email delivery. Bulletin .docx is still produced and stored.",
     )
     parser.add_argument(
         "--force",
@@ -239,6 +245,8 @@ def _resolve_storage_paths(
     gfs_cycle: datetime,
     cmems_layer: date,
     logger: logging.Logger,
+    *,
+    require_existing: bool = False,
 ) -> tuple[Path | None, Path | None]:
     """
     Read storage paths from manifest, when available.
@@ -265,6 +273,8 @@ def _resolve_storage_paths(
         if isinstance(storage_path, str):
             gfs_storage_path = Path(storage_path)
             logger.info("using GFS storage from manifest: %s", storage_path)
+            if require_existing and not gfs_storage_path.exists():
+                raise FileNotFoundError(f"manifest GFS storage_path does not exist: {gfs_storage_path}")
 
     cmems_block = manifest.get("cmems")
     if isinstance(cmems_block, dict):
@@ -280,6 +290,8 @@ def _resolve_storage_paths(
         if isinstance(storage_path, str):
             cmems_storage_path = Path(storage_path)
             logger.info("using CMEMS storage from manifest: %s", storage_path)
+            if require_existing and not cmems_storage_path.exists():
+                raise FileNotFoundError(f"manifest CMEMS storage_path does not exist: {cmems_storage_path}")
 
     return gfs_storage_path, cmems_storage_path
 
@@ -346,17 +358,16 @@ def _run_pipeline(
         days=days,
     )
     logger.info("forecast_main: bulletin written to %s", output_path)
-    logger.info("forecast_main: email skipped (--no-email or 15.E.1 default)")
 
 
 def _emit_pipeline_plan(*, cycle: str, gfs_run_date: str, cmems_run_date: str, output_path: Path) -> None:
-    print("[dry-run] pipeline plan:")
-    print(f"1) collect_meteo_data(...): cycle={cycle}, rundate={gfs_run_date}")
-    print(f"2) collect_wave_data(...): rundate={cmems_run_date}")
-    print("3) assert_valid_for_bulletin(meteo, wave, strict=True)")
-    print("4) temp_statistics / wind_statistics / precip_statistics")
-    print(f"5) build_doc(...) -> {output_path}")
-    print("email: skipped (15.E.1; email layer added in 15.E.2)")
+    _write_cli_line("[dry-run] pipeline plan:")
+    _write_cli_line(f"1) collect_meteo_data(...): cycle={cycle}, rundate={gfs_run_date}")
+    _write_cli_line(f"2) collect_wave_data(...): rundate={cmems_run_date}")
+    _write_cli_line("3) assert_valid_for_bulletin(meteo, wave, strict=True)")
+    _write_cli_line("4) temp_statistics / wind_statistics / precip_statistics")
+    _write_cli_line(f"5) build_doc(...) -> {output_path}")
+    _write_cli_line("email: skipped (dry-run; email layer not invoked)")
 
 
 def _build_bulletin_days(
@@ -408,6 +419,49 @@ def _build_bulletin_days(
     return days
 
 
+def _write_cli_line(message: str) -> None:
+    sys.stdout.write(f"{message}\n")
+
+
+def _load_config(path: Path = CONFIG_PATH) -> configparser.ConfigParser:
+    cfg = configparser.ConfigParser()
+    read_ok = cfg.read(path, encoding="utf-8")
+    if not read_ok:
+        raise _EmailDeliveryError(f"Config file is not readable: {path}")
+    return cfg
+
+
+def _maybe_send_email(*, output_path: Path, resolved_utc: datetime, logger: logging.Logger) -> None:
+    """Send the generated bulletin via existing email sender API (ADR-001 §2)."""
+    global email_sender
+    if email_sender is None:
+        from utils import email_sender as email_sender_module
+
+        email_sender = email_sender_module
+
+    try:
+        cfg = _load_config()
+        email_cfg = cfg["Email"]
+        ok = email_sender.send_bulletin(
+            docx_path=str(output_path),
+            recipient=email_cfg["recipient"],
+            smtp_host=email_cfg["smtp_host"],
+            smtp_port=int(email_cfg["smtp_port"]),
+            login=email_cfg["login"],
+            password=email_cfg["password"],
+            bulletin_type="on-demand",
+            run_date=resolved_utc.astimezone(MSK_TZ),
+        )
+        if not ok:
+            raise _EmailDeliveryError("send_bulletin returned False")
+    except _EmailDeliveryError:
+        raise
+    except Exception as exc:
+        raise _EmailDeliveryError(str(exc)) from exc
+
+    logger.info("forecast_main: email delivered for %s", output_path)
+
+
 def main(argv: list[str] | None = None) -> int:
     try:
         args = parse_args(argv)
@@ -423,8 +477,6 @@ def main(argv: list[str] | None = None) -> int:
             args.polling_minutes,
             args.dry_run,
         )
-        if args.no_email:
-            logger.info("--no-email accepted; email layer is not enabled in 15.E.1")
         logger.info("Resolved UTC datetime: %s", resolved_utc.isoformat())
         resolved_gfs_cycle = resolve_gfs_cycle(resolved_utc)
         resolved_cmems_layer = resolve_cmems_layer(resolved_utc)
@@ -436,24 +488,30 @@ def main(argv: list[str] | None = None) -> int:
             force=args.force,
         )
         manifest = read_manifest(MANIFEST_PATH)
-        _resolve_storage_paths(manifest, resolved_gfs_cycle, resolved_cmems_layer, logger)
+        _resolve_storage_paths(
+            manifest,
+            resolved_gfs_cycle,
+            resolved_cmems_layer,
+            logger,
+            require_existing=not args.dry_run,
+        )
         logger.info("Resolved GFS cycle UTC: %s", resolved_gfs_cycle.isoformat())
         logger.info("Resolved CMEMS layer date: %s", resolved_cmems_layer.isoformat())
         logger.info("Resolved output filename (DT-14-T): %s", output_path)
 
         if args.dry_run:
-            print("[dry-run] forecast_main resolved parameters:")
-            print(f"  input_date: {args.date}")
-            print(f"  input_time: {args.time}")
-            print(f"  input_tz: {args.tz}")
-            print(f"  UTC datetime: {resolved_utc.isoformat()}")
-            print(f"  gfs_cycle: {resolved_gfs_cycle.isoformat()}")
-            print(f"  cmems_layer: {resolved_cmems_layer.isoformat()}")
-            print(f"  gfs_lag: {GFS_LAG_HOURS}h")
-            print(f"  cmems_lag: {CMEMS_LAG_HOURS}h")
-            print(f"  timeout_minutes: {args.timeout_minutes}")
-            print(f"  polling_minutes: {args.polling_minutes}")
-            print(f"  output_filename: {output_path}")
+            _write_cli_line("[dry-run] forecast_main resolved parameters:")
+            _write_cli_line(f"  input_date: {args.date}")
+            _write_cli_line(f"  input_time: {args.time}")
+            _write_cli_line(f"  input_tz: {args.tz}")
+            _write_cli_line(f"  UTC datetime: {resolved_utc.isoformat()}")
+            _write_cli_line(f"  gfs_cycle: {resolved_gfs_cycle.isoformat()}")
+            _write_cli_line(f"  cmems_layer: {resolved_cmems_layer.isoformat()}")
+            _write_cli_line(f"  gfs_lag: {GFS_LAG_HOURS}h")
+            _write_cli_line(f"  cmems_lag: {CMEMS_LAG_HOURS}h")
+            _write_cli_line(f"  timeout_minutes: {args.timeout_minutes}")
+            _write_cli_line(f"  polling_minutes: {args.polling_minutes}")
+            _write_cli_line(f"  output_filename: {output_path}")
             _run_pipeline(
                 resolved_utc=resolved_utc,
                 gfs_cycle=resolved_gfs_cycle,
@@ -472,16 +530,29 @@ def main(argv: list[str] | None = None) -> int:
             logger=logger,
             dry_run=False,
         )
+        if args.no_email:
+            logger.info("forecast_main: email skipped (--no-email)")
+        else:
+            _maybe_send_email(output_path=output_path, resolved_utc=resolved_utc, logger=logger)
         return 0
+    except ValidationError as exc:
+        logger.error("validation failed: %s", exc, exc_info=True)
+        return 1
+    except (FileNotFoundError, ManifestCorruptedError) as exc:
+        logger.error("ingestion missing: %s", exc, exc_info=True)
+        return 2
+    except _EmailDeliveryError as exc:
+        logger.error("email delivery failed: %s", exc, exc_info=True)
+        return 3
     except ValueError as exc:
         logger.error("%s", exc)
         return 2
     except KeyboardInterrupt:
         logger.warning("Interrupted by user.")
         return 130
-    except Exception:
-        logger.exception("Unhandled error in forecast_main.")
-        return 1
+    except Exception as exc:
+        logger.exception("internal error: %s", exc)
+        return 10
 
 
 if __name__ == "__main__":

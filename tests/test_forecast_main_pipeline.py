@@ -30,7 +30,7 @@ def test_real_run_creates_docx_file(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     _patch_pipeline(monkeypatch)
 
-    exit_code = forecast_main.main(["--date", "2026-05-14", "--time", "18:00", "--tz", "MSK"])
+    exit_code = forecast_main.main(["--date", "2026-05-14", "--time", "18:00", "--tz", "MSK", "--no-email"])
 
     output_path = tmp_path / "output" / "Прогноз_20260514_1800.docx"
     assert exit_code == 0
@@ -45,7 +45,7 @@ def test_real_run_force_overwrites_existing_docx(monkeypatch, tmp_path):
     output_path.write_bytes(b"old")
 
     exit_code = forecast_main.main(
-        ["--date", "2026-05-14", "--time", "18:00", "--tz", "MSK", "--force"]
+        ["--date", "2026-05-14", "--time", "18:00", "--tz", "MSK", "--force", "--no-email"]
     )
 
     assert exit_code == 0
@@ -60,7 +60,7 @@ def test_real_run_collision_without_force_uses_req_suffix(monkeypatch, tmp_path)
     output_dir.mkdir()
     (output_dir / "Прогноз_20260514_1800.docx").write_bytes(b"existing")
 
-    exit_code = forecast_main.main(["--date", "2026-05-14", "--time", "18:00", "--tz", "MSK"])
+    exit_code = forecast_main.main(["--date", "2026-05-14", "--time", "18:00", "--tz", "MSK", "--no-email"])
 
     matches = list(output_dir.glob("Прогноз_20260514_1800_req-*.docx"))
     assert exit_code == 0
@@ -77,7 +77,7 @@ def test_no_email_flag_accepted(monkeypatch, tmp_path, capsys):
     captured = capsys.readouterr()
 
     assert exit_code == 0
-    assert "email: skipped (15.E.1; email layer added in 15.E.2)" in captured.out
+    assert "email: skipped (dry-run; email layer not invoked)" in captured.out
 
 
 def test_unknown_exception_returns_1(monkeypatch, tmp_path, caplog):
@@ -85,9 +85,9 @@ def test_unknown_exception_returns_1(monkeypatch, tmp_path, caplog):
     _patch_pipeline(monkeypatch, doc_error=RuntimeError("boom"))
     caplog.set_level(logging.ERROR)
 
-    exit_code = forecast_main.main(["--date", "2026-05-14", "--time", "18:00", "--tz", "MSK"])
+    exit_code = forecast_main.main(["--date", "2026-05-14", "--time", "18:00", "--tz", "MSK", "--no-email"])
 
-    assert exit_code == 1
+    assert exit_code == 10
     assert "RuntimeError: boom" in caplog.text or "boom" in caplog.text
 
 
@@ -101,7 +101,9 @@ def test_manifest_paths_logged_when_present(monkeypatch, tmp_path, caplog):
     )
     caplog.set_level(logging.INFO)
 
-    exit_code = forecast_main.main(["--date", "2026-05-14", "--time", "18:00", "--tz", "MSK"])
+    (tmp_path / "storage" / "gfs" / "20260514" / "06z").mkdir(parents=True)
+
+    exit_code = forecast_main.main(["--date", "2026-05-14", "--time", "18:00", "--tz", "MSK", "--no-email"])
 
     assert exit_code == 0
     assert "using GFS storage from manifest: storage/gfs/20260514/06z/" in caplog.text
@@ -117,7 +119,9 @@ def test_manifest_cycle_mismatch_logs_warning(monkeypatch, tmp_path, caplog):
     )
     caplog.set_level(logging.WARNING)
 
-    exit_code = forecast_main.main(["--date", "2026-05-14", "--time", "18:00", "--tz", "MSK"])
+    (tmp_path / "storage" / "gfs" / "20260513" / "12z").mkdir(parents=True)
+
+    exit_code = forecast_main.main(["--date", "2026-05-14", "--time", "18:00", "--tz", "MSK", "--no-email"])
 
     assert exit_code == 0
     assert "manifest GFS cycle != resolved cycle" in caplog.text
@@ -128,7 +132,7 @@ def test_manifest_missing_does_not_warn(monkeypatch, tmp_path, caplog):
     calls = _patch_pipeline(monkeypatch)
     caplog.set_level(logging.INFO)
 
-    exit_code = forecast_main.main(["--date", "2026-05-14", "--time", "18:00", "--tz", "MSK"])
+    exit_code = forecast_main.main(["--date", "2026-05-14", "--time", "18:00", "--tz", "MSK", "--no-email"])
 
     assert exit_code == 0
     assert calls["doc"] == 1
