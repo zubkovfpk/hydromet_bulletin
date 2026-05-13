@@ -68,6 +68,7 @@ Thumbs.db
 dry_run_*.txt
 dry_run_*.out.txt
 ingest_*.py
+!ingest_gfs.py
 ingest_*.out.txt
 probe_*.py
 probe_*.out.txt
