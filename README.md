@@ -1,7 +1,7 @@
 # Hydromet Bulletin — Python + Docker
 
-Автоматическое формирование **Гидрометеорологического бюллетеня**
-(акватория Северного Каспия) с отправкой на email по расписанию.
+Формирование **Гидрометеорологического бюллетеня**
+(акватория Северного Каспия) по запросу оператора с отправкой на email.
 
 ---
 
@@ -10,8 +10,10 @@
 ```
 hydromet_bulletin/
 │
-├── forecast_morning.py        ← утренний бюллетень (09:00 MSK)
-├── forecast_evening.py        ← вечерний бюллетень (19:00 MSK)
+├── ingest_gfs.py              ← загрузка GFS в storage/manifest (Scenario X)
+├── forecast_main.py           ← основной on-demand runner бюллетеня
+├── forecast_morning.py        ← deprecated (15.D.4), hard-cut в S18
+├── forecast_evening.py        ← deprecated (15.D.4), hard-cut в S18
 ├── config.ini                 ← все настройки (SMTP, пути, bbox)
 ├── requirements.txt           ← Python-зависимости
 │
@@ -23,7 +25,7 @@ hydromet_bulletin/
 ├── scripts/
 │   ├── install.sh             ← первичная установка на сервер
 │   ├── deploy.sh              ← сборка и запуск Docker
-│   ├── run_now.sh             ← ручной запуск бюллетеня
+│   ├── run_now.sh             ← legacy wrapper; для Scenario X используйте CLI ниже
 │   ├── status.sh              ← статус: контейнер, файлы, лог
 │   ├── logs.sh                ← просмотр логов
 │   ├── stop.sh                ← остановка контейнера
@@ -120,8 +122,12 @@ python forecast_main.py --date 2026-05-13 --time 18:00 --tz MSK --dry-run
 | Действие | Команда |
 |---|---|
 | Запустить / обновить код | `bash scripts/deploy.sh` |
-| Ручной запуск бюллетеня | `bash scripts/run_now.sh morning` |
-| Ручной запуск с датой | `bash scripts/run_now.sh evening 20260331` |
+| Загрузить GFS | `python ingest_gfs.py --cycle 2026-05-13T12Z` |
+| Dry-run загрузки GFS | `python ingest_gfs.py --dry-run` |
+| Сформировать бюллетень | `python forecast_main.py --date 2026-05-13 --time 18:00 --tz MSK` |
+| Dry-run бюллетеня | `python forecast_main.py --date 2026-05-13 --time 18:00 --tz MSK --dry-run` |
+| Перезаписать существующий `.docx` | `python forecast_main.py --date 2026-05-13 --time 18:00 --tz MSK --force` |
+| Сформировать без отправки email | `python forecast_main.py --date 2026-05-13 --time 18:00 --tz MSK --no-email` |
 | Статус и последние файлы | `bash scripts/status.sh` |
 | Смотреть логи live | `bash scripts/logs.sh` |
 | Только лог Python | `bash scripts/logs.sh app` |
@@ -135,12 +141,10 @@ python forecast_main.py --date 2026-05-13 --time 18:00 --tz MSK --dry-run
 
 ## Расписание
 
-| Бюллетень | MSK   | UTC   | cron (UTC)   |
-|-----------|-------|-------|--------------|
-| Утренний  | 09:00 | 06:00 | `0 6 * * *`  |
-| Вечерний  | 19:00 | 16:00 | `0 16 * * *` |
-
-Изменить расписание: отредактируйте `crontab`, затем `bash scripts/deploy.sh`.
+Scenario X — on-demand runner: на текущем этапе `ingest_gfs.py` и
+`forecast_main.py` запускаются вручную оператором. Автоматизация через
+cron-bridge запланирована на S18; до этого не используйте старые
+morning/evening cron-команды как штатный путь запуска.
 
 ---
 
