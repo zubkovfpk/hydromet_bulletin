@@ -51,7 +51,8 @@ gantt
     section Сессия 16 (интеграция и доставка)
     15.D.3 polling + integration     :done, 2026-05-13, 1d
     15.D.4 deprecation + README      :done, 2026-05-13, 1d
-    15.E Migration + SMTP verify     :2026-04-25, 2d
+    15.E Migration + SMTP verify     :done, 2026-05-14, 1d
+    %% Note: 15.E closed partial — DT-14-U (SMTP verify) deferred to S17.1.
 ```
 
 ## Хронология сессий
@@ -369,6 +370,12 @@ filename-конвенция `.docx` и подготовка к боевой emai
     ingestion end-to-end на NOMADS подтверждён (`2026-05-13T06Z`);
     SMTP verify (DT-14-U) deferred в S17.1;
     см. «Итоги 15.E.2» в `docs/conversation_history.md`.
+  - **Статус (2026-05-14):** 15.E.3 закрыт коммитами
+    `0760a3f` (README cleanup, DT-16-5) и
+    финальным docs-коммитом этого шага;
+    S16 формально закрыт;
+    DT-14-U (SMTP verify) перенесён в S17.1 как prerequisite +
+    manual verify; см. «Итоги S16» ниже.
 
 **DoD сессии (критерии перехода S16→S17)**
 
@@ -392,3 +399,37 @@ filename-конвенция `.docx` и подготовка к боевой emai
 - ADR-001 (`docs/adr/001-ondemand-ingestion.md`): §3 storage/archive,
   §4 manifest v1.0, §5 CLI ingest_gfs, §7 events, §11 критерии S16→S17.
 - `docs/project_context.md`, раздел 9: текущие открытые DT и их DoD.
+
+### Итоги Сессии 16 (2026-05-13..14)
+
+**Состав работ**
+
+- 15.D.3: ingest_gfs.py + foundation utils + archive + manifest.
+- 15.D.4: deprecation legacy + DT-14-T filename + первичный README.
+- 15.E.1: forecast_main.py подключает pipeline и пишет .docx.
+- 15.E.2: email layer + DT-14-Y exit codes (0/1/2/3/10).
+- 15.E.2-fix: storage roots для ingest_gfs.py из config.ini.
+- 15.E.2-robustness: event_logger safety + dry-run без FS side-effect.
+- 15.E.3: README cleanup + docs closeout S16.
+
+**Closed**
+
+- DT-14-T, DT-14-Y, DT-14-Z (semantics → DT-16-2),
+  DT-15-A, DT-16-5.
+
+**Не закрыты / перенесены**
+
+- DT-14-V — near-complete (final on hard-cut S18).
+- DT-14-U — deferred to S17.1 (prerequisite + manual verify).
+- DT-14-S — parking lot.
+- DT-16-1, DT-16-2 — S17.1.
+- DT-16-3, DT-16-4 — S17.2.
+
+**End-to-end на проде**
+
+- ingest_gfs.py отработал на NOMADS (cycle 2026-05-13T06Z),
+  manifest и events записаны.
+- forecast_main.py завершился exit 2 (ingestion_missing) из-за
+  расхождения regex `^storage/gfs/...` и реального canon
+  `data/storage/gfs/...` — known issue, owner DT-16-1.
+- SMTP verify не выполнен — заблокирован DT-16-1.

@@ -131,6 +131,18 @@ hydromet_bulletin/
 
 ### В работе
 - В работе (S15, 2026-04-22, 13:00–19:00 MSK): unified `forecast_main.py` CLI (DT-14-V, hard-cut), email verify на боевом корпоративном SMTP (DT-14-U), docx filename convention (DT-14-T), wave empty-slice warning (DT-14-S), structured exit codes (DT-14-Y).
+- **S16, 2026-05-13..14:** реализация Scenario X на уровне runner
+  и ingestion слоя. Закрыты 15.D.3 (ingest_gfs.py + foundation +
+  archive + manifest), 15.D.4 (deprecation legacy + DT-14-T
+  filename + README), 15.E.1 (pipeline + .docx),
+  15.E.2 (email + DT-14-Y exit codes), 15.E.2-fix (storage из
+  config.ini), 15.E.2-robustness (event_logger safety, dry-run
+  без FS-side-effect), 15.E.3 (README cleanup + docs closeout).
+  DT-14-Y / DT-14-T / DT-14-Z / DT-15-A — closed.
+  DT-14-U — deferred (S17.1 prerequisite + manual SMTP verify).
+  DT-14-V — partial (final on hard-cut S18).
+  DT-14-S — parking lot.
+  Введены DT-16-1..5 (см. раздел 9).
 
 ### Не начато
 - Интеграционные тесты end-to-end (полный цикл forecast → docx → email): **частично выполнены** (сессия 14) — dry-run → `.docx` пройден; осталось подтверждение доставки email (DT-14-U).
@@ -167,6 +179,17 @@ hydromet_bulletin/
   gfs_cycle = cfg.get("GFS_SOURCES", "GFS_CYCLES", fallback="00z").split(",")[0].strip()
   ```
   Это **временное решение** в рамках адаптации processing layer (сессия 7); не является финальной policy. Финальное решение (явный `--cycle` CLI-параметр с приоритетом над конфигом) вынесено в DT-07-1 — см. раздел 9.
+- **GFS storage path canon (after S16):**
+  - Owner of truth для путей GFS-хранилища — `config.ini`,
+    ключи `[GFS_STORAGE].GFS_OUTPUT_DIR` и `[GFS_STORAGE].GFS_ARCHIVE_DIR`.
+  - Дефолт (`config.example.ini`): `data/storage/gfs` и
+    `data/storage/archive/gfs`.
+  - `ingest_gfs.py` (15.E.2-fix, `03c7969`) читает эти ключи и
+    собирает `manifest['gfs']['storage_path']` от реального корня.
+  - Текущий regex `^storage/gfs/...` в `schemas/manifest_v1.json` и
+    `utils.manifest.validate_schema` рассинхронизирован с этим
+    каноном; временно используется локальный guard в `ingest_gfs.py`.
+  - Полная синхронизация — задача DT-16-1 (S17.1).
 - **Python интерпретатор**: использовать `py` (Python Launcher для Windows) — он автоматически находит установленный Python 3.x без привязки к конкретному пути.  
   **НЕ использовать просто `python`** — в системе он указывает на Microsoft Store stub.
 - **Dev environment runtime policy** (сессия 13, нормативный): на dev-машине проекта `hydromet_bulletin` **нет работающих автоматических процессов** (cron / scheduler / service). Любые запуски (`fetch_inputs.py`, `forecast_morning.py`, `forecast_evening.py`, загрузчики GFS/CMEMS, конвертеры) выполняются **ТОЛЬКО вручную** — в рамках промптов сессии или явных команд пользователя. Cron-выражения в `config.ini` (`GFS_DOWNLOAD_SCHEDULE_CRON` и подобные) — это **намеренные настройки для будущего продакшена**, не реальные задания на текущей машине. **Следствие для агентов:** при анализе логов и состояния storage **НЕ предполагать**, что какие-либо данные появились или обновились автоматически; если нет явного ручного запуска в рамках сессии — данных нет.
@@ -337,12 +360,17 @@ python forecast_main.py --cycle {morning|evening}
 - **DT-13-3** ✅ **Закрыт (сессия 14, 90523af)**: date policy теперь учитывает GFS availability check + fallback today-1 при отсутствии GFS за today.
 - **DT-13-4** ✅ **Закрыт (сессия 14, bd70c79 + 6efa10e)**: storage layout migration (meteo-side) + CMEMS wave contract/discovery (wave-side).
 - **DT-13-6** ⚠️ **Частично закрыт (сессия 14, audit verdict)**: выявлены мёртвые ключи; решение B: оставить как `legacy/reserved` с пометкой в docs; cleanup конфига — отдельный sweep при необходимости.
-- **DT-14-V**: unified `forecast.py` CLI (`--cycle/--run-hour/--first-forecast-dt/--no-send`).
-- **DT-14-U**: email delivery verification (логи success, но письма нет).
-- **DT-14-T**: `.docx` filename convention — start_date-based, не request-date-based.
-- **DT-14-S**: `RuntimeWarning: Mean of empty slice` от `nanmean` в `collect_wave_data.py`.
-- **DT-14-Y**: exit code propagation в forecast runner.
-- **DT-14-Z**: scheduled ingestion + archive rotation для CMEMS/GFS.
+- **DT-14-V**: unified `forecast_main.py` CLI — **near-complete (final on hard-cut S18)**. Закрыта ingestion + deprecation (15.D.3/D.4), pipeline + .docx (15.E.1), email + exit codes (15.E.2); финальная пометка — на closeout S16/S18.
+- **DT-14-U**: email delivery verification — **deferred (S17.1 prerequisite + manual verify)**. Заблокирован DT-16-1 (storage canon alignment).
+- **DT-14-T**: `.docx` filename convention — **closed (15.D.4, `526e549`)**.
+- **DT-14-S**: `RuntimeWarning: Mean of empty slice` от `nanmean` в `collect_wave_data.py` — parking lot, без изменений.
+- **DT-14-Y**: exit code propagation в forecast runner — **closed (15.E.2, `4083d37`)**.
+- **DT-14-Z**: scheduled ingestion + archive rotation — **closed (15.D.3-2, `f9fb17a`; semantics → DT-16-2)**.
+- **DT-16-1**: manifest.gfs.storage_path contract alignment — **open (S17.1)**.
+- **DT-16-2**: archive rotation semantics (before vs after download) — **open (S17.1)**.
+- **DT-16-3**: forecast_main start_time ceil per ADR-001 — **open (S17.2)**.
+- **DT-16-4**: strict-manifest mode in forecast_main — **open (S17.2)**.
+- **DT-16-5**: README cleanup of legacy operational commands — **closed (15.E.3, `0760a3f`)**.
 - **Normalizing/preprocessing layer для GFS**: после v1, если прямой переход `gfs_downloader` → `collect_meteo_data` останется неудобным.
 - **Downstream validation перед `doc_builder.py`**: day-level проверка сформированных диапазонов (`wind_min ≤ wind_max` и т.д.); не блокирует v1.
 - **Soft quality rules**: физические диапазоны, NaN ratio thresholds, sanity checks для precipitation — warning-only layer после MVP.
