@@ -1,4 +1,6 @@
-from utils.collect_meteo_data import _discover_gfs_nc_files, _resolve_gfs_data_dir
+import pytest
+
+from utils.collect_meteo_data import _discover_gfs_nc_files, _resolve_gfs_data_dir, collect_meteo_data
 
 
 def test_collect_meteo_data_uses_new_layout_by_default(tmp_path):
@@ -20,3 +22,12 @@ def test_collect_meteo_data_uses_new_layout_by_default(tmp_path):
 
     assert resolved == new_dir
     assert files == [marker]
+
+
+def test_collect_meteo_data_gfs_data_dir_override(tmp_path):
+    with pytest.raises(FileNotFoundError, match="custom_dir"):
+        collect_meteo_data(
+            gfs_data_dir=str(tmp_path / "custom_dir"),
+            run_date="20260514",
+            cycle="12z",
+        )

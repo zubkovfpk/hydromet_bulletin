@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import configparser
 import logging
+import re
 import sys
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
@@ -309,6 +310,27 @@ def _resolve_storage_paths(
     return gfs_storage_path, cmems_storage_path
 
 
+def _cycle_from_manifest(manifest: dict[str, Any]) -> datetime | None:
+    """Return GFS cycle datetime from manifest, or None (ADR-002)."""
+    gfs_block = manifest.get("gfs")
+    if not isinstance(gfs_block, dict):
+        return None
+    cycle_str = gfs_block.get("latest_successful_cycle")
+    if not isinstance(cycle_str, str):
+        return None
+    match = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})T(00|06|12|18)Z", cycle_str)
+    if match is None:
+        return None
+    return datetime(
+        int(match.group(1)),
+        int(match.group(2)),
+        int(match.group(3)),
+        int(match.group(4)),
+        0,
+        tzinfo=UTC_TZ,
+    )
+
+
 def _read_manifest_for_run(path: Path, *, dry_run: bool, logger: logging.Logger) -> dict[str, Any]:
     try:
         return read_manifest(path)
@@ -327,6 +349,7 @@ def _run_pipeline(
     output_path: Path,
     logger: logging.Logger,
     dry_run: bool,
+    gfs_storage_path: Path | None = None,
 ) -> None:
     """
     Glue existing processing modules under ADR-001 Scenario X.
@@ -354,7 +377,14 @@ def _run_pipeline(
         output_path,
     )
     logger.info("forecast_main: pipeline step 1/5 collect_meteo_data run_date=%s cycle=%s", gfs_run_date, cycle)
-    meteo = collect_meteo_data(run_date=gfs_run_date, cycle=cycle)
+    if gfs_storage_path is not None:
+        meteo = collect_meteo_data(
+            run_date=gfs_run_date,
+            cycle=cycle,
+            gfs_data_dir=str(gfs_storage_path),
+        )
+    else:
+        meteo = collect_meteo_data(run_date=gfs_run_date, cycle=cycle)
 
     logger.info("forecast_main: pipeline step 2/5 collect_wave_data run_date=%s", cmems_run_date)
     wave, start_date, end_date = collect_wave_data(run_date=cmems_run_date)
@@ -517,14 +547,25 @@ def main(argv: list[str] | None = None) -> int:
                 force=args.force,
             )
         manifest = _read_manifest_for_run(MANIFEST_PATH, dry_run=args.dry_run, logger=logger)
-        _resolve_storage_paths(
+        manifest_cycle = _cycle_from_manifest(manifest)
+        if manifest_cycle is not None:
+            effective_gfs_cycle = manifest_cycle
+            if manifest_cycle != resolved_gfs_cycle:
+                logger.info(
+                    "using GFS cycle from manifest: %s (floor would be %s)",
+                    _format_cycle_for_events(manifest_cycle),
+                    _format_cycle_for_events(resolved_gfs_cycle),
+                )
+        else:
+            effective_gfs_cycle = resolved_gfs_cycle
+        gfs_storage_path, cmems_storage_path = _resolve_storage_paths(
             manifest,
-            resolved_gfs_cycle,
+            effective_gfs_cycle,
             resolved_cmems_layer,
             logger,
             require_existing=not args.dry_run,
         )
-        logger.info("Resolved GFS cycle UTC: %s", resolved_gfs_cycle.isoformat())
+        logger.info("Resolved GFS cycle UTC: %s", effective_gfs_cycle.isoformat())
         logger.info("Resolved CMEMS layer date: %s", resolved_cmems_layer.isoformat())
         logger.info("Resolved output filename (DT-14-T): %s", output_path)
 
@@ -534,7 +575,7 @@ def main(argv: list[str] | None = None) -> int:
             _write_cli_line(f"  input_time: {args.time}")
             _write_cli_line(f"  input_tz: {args.tz}")
             _write_cli_line(f"  UTC datetime: {resolved_utc.isoformat()}")
-            _write_cli_line(f"  gfs_cycle: {resolved_gfs_cycle.isoformat()}")
+            _write_cli_line(f"  gfs_cycle: {effective_gfs_cycle.isoformat()}")
             _write_cli_line(f"  cmems_layer: {resolved_cmems_layer.isoformat()}")
             _write_cli_line(f"  gfs_lag: {GFS_LAG_HOURS}h")
             _write_cli_line(f"  cmems_lag: {CMEMS_LAG_HOURS}h")
@@ -543,21 +584,23 @@ def main(argv: list[str] | None = None) -> int:
             _write_cli_line(f"  output_filename: {output_path}")
             _run_pipeline(
                 resolved_utc=resolved_utc,
-                gfs_cycle=resolved_gfs_cycle,
+                gfs_cycle=effective_gfs_cycle,
                 cmems_layer=resolved_cmems_layer,
                 output_path=output_path,
                 logger=logger,
                 dry_run=True,
+                gfs_storage_path=gfs_storage_path,
             )
             return 0
 
         _run_pipeline(
             resolved_utc=resolved_utc,
-            gfs_cycle=resolved_gfs_cycle,
+            gfs_cycle=effective_gfs_cycle,
             cmems_layer=resolved_cmems_layer,
             output_path=output_path,
             logger=logger,
             dry_run=False,
+            gfs_storage_path=gfs_storage_path,
         )
         if args.no_email:
             logger.info("forecast_main: email skipped (--no-email)")

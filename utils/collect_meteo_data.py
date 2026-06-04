@@ -135,6 +135,7 @@ def collect_meteo_data(
     gfs_storage_subdir: str = "data/storage/gfs",
     run_date: str | None = None,
     cycle: str | None = None,
+    gfs_data_dir: str | None = None,
 ) -> dict:
     """
     Загружает метеоданные GFS и возвращает словарь с массивами.
@@ -148,6 +149,7 @@ def collect_meteo_data(
     gfs_storage_subdir : str — путь к новому GFS storage относительно base_dir
     run_date        : str | None — дата запуска 'YYYYMMDD'; если None — сегодня
     cycle           : str | None — цикл GFS ('00z'/'06z'/'12z'/'18z'), если None — '00z'
+    gfs_data_dir    : str | None — прямой путь к каталогу GFS (ADR-002 manifest override)
 
     Returns
     -------
@@ -164,13 +166,17 @@ def collect_meteo_data(
         shapefile_dir = str(Path(base_dir) / "data" / "shapefiles")
     legacy_results_subdir = results_subdir or _LEGACY_GFS_RESULTS_SUBDIR
 
-    data_dir = _resolve_gfs_data_dir(
-        base_dir=base_dir,
-        run_date=run_date,
-        cycle=cycle,
-        gfs_storage_subdir=gfs_storage_subdir,
-        legacy_results_subdir=legacy_results_subdir,
-    )
+    if gfs_data_dir is not None:
+        data_dir = Path(gfs_data_dir)
+        logger.info("GFS data dir (manifest override): %s", data_dir)
+    else:
+        data_dir = _resolve_gfs_data_dir(
+            base_dir=base_dir,
+            run_date=run_date,
+            cycle=cycle,
+            gfs_storage_subdir=gfs_storage_subdir,
+            legacy_results_subdir=legacy_results_subdir,
+        )
     nc_files = _discover_gfs_nc_files(data_dir)
     if not nc_files:
         raise FileNotFoundError(

@@ -108,18 +108,41 @@ def test_manifest_paths_logged_when_present(monkeypatch, tmp_path, caplog):
     _patch_pipeline(monkeypatch)
     _write_manifest(
         tmp_path / "storage" / "manifest.json",
-        gfs_cycle="2026-05-14T06Z",
+        gfs_cycle="2026-05-14T12Z",
         gfs_storage_root="storage",
-        gfs_relative_path="gfs/20260514/06z/",
+        gfs_relative_path="gfs/20260514/12z/",
     )
     caplog.set_level(logging.INFO)
 
-    (tmp_path / "storage" / "gfs" / "20260514" / "06z").mkdir(parents=True)
+    (tmp_path / "storage" / "gfs" / "20260514" / "12z").mkdir(parents=True)
 
+    # 18:00 MSK → floor 06Z (lag 6h); manifest 12Z → info log
     exit_code = forecast_main.main(["--date", "2026-05-14", "--time", "18:00", "--tz", "MSK", "--no-email"])
 
     assert exit_code == 0
-    assert "using GFS storage from manifest: storage / gfs/20260514/06z/" in caplog.text
+    assert "using GFS storage from manifest: storage / gfs/20260514/12z/" in caplog.text
+    assert "using GFS cycle from manifest:" in caplog.text
+
+
+def test_manifest_cycle_used_over_floor(monkeypatch, tmp_path, caplog):
+    """manifest cycle (12Z) takes priority over floor cycle (06Z)."""
+    monkeypatch.chdir(tmp_path)
+    _patch_pipeline(monkeypatch)
+    _write_manifest(
+        tmp_path / "storage" / "manifest.json",
+        gfs_cycle="2026-05-14T12Z",
+        gfs_storage_root="storage",
+        gfs_relative_path="gfs/20260514/12z/",
+    )
+    (tmp_path / "storage" / "gfs" / "20260514" / "12z").mkdir(parents=True)
+    caplog.set_level(logging.INFO)
+
+    exit_code = forecast_main.main(
+        ["--date", "2026-05-14", "--time", "09:01", "--tz", "UTC", "--no-email"]
+    )
+
+    assert exit_code == 0
+    assert "using GFS cycle from manifest: 2026-05-14T12Z" in caplog.text
 
 
 def test_manifest_cycle_mismatch_logs_warning(monkeypatch, tmp_path, caplog):
@@ -131,14 +154,14 @@ def test_manifest_cycle_mismatch_logs_warning(monkeypatch, tmp_path, caplog):
         gfs_storage_root="storage",
         gfs_relative_path="gfs/20260513/12z/",
     )
-    caplog.set_level(logging.WARNING)
+    caplog.set_level(logging.INFO)
 
     (tmp_path / "storage" / "gfs" / "20260513" / "12z").mkdir(parents=True)
 
     exit_code = forecast_main.main(["--date", "2026-05-14", "--time", "18:00", "--tz", "MSK", "--no-email"])
 
     assert exit_code == 0
-    assert "manifest GFS cycle != resolved cycle" in caplog.text
+    assert "using GFS cycle from manifest: 2026-05-13T12Z" in caplog.text
 
 
 def test_manifest_missing_does_not_warn(monkeypatch, tmp_path, caplog):
