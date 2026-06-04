@@ -109,7 +109,8 @@ def test_manifest_paths_logged_when_present(monkeypatch, tmp_path, caplog):
     _write_manifest(
         tmp_path / "storage" / "manifest.json",
         gfs_cycle="2026-05-14T06Z",
-        gfs_storage_path="storage/gfs/20260514/06z/",
+        gfs_storage_root="storage",
+        gfs_relative_path="gfs/20260514/06z/",
     )
     caplog.set_level(logging.INFO)
 
@@ -118,7 +119,7 @@ def test_manifest_paths_logged_when_present(monkeypatch, tmp_path, caplog):
     exit_code = forecast_main.main(["--date", "2026-05-14", "--time", "18:00", "--tz", "MSK", "--no-email"])
 
     assert exit_code == 0
-    assert "using GFS storage from manifest: storage/gfs/20260514/06z/" in caplog.text
+    assert "using GFS storage from manifest: storage / gfs/20260514/06z/" in caplog.text
 
 
 def test_manifest_cycle_mismatch_logs_warning(monkeypatch, tmp_path, caplog):
@@ -127,7 +128,8 @@ def test_manifest_cycle_mismatch_logs_warning(monkeypatch, tmp_path, caplog):
     _write_manifest(
         tmp_path / "storage" / "manifest.json",
         gfs_cycle="2026-05-13T12Z",
-        gfs_storage_path="storage/gfs/20260513/12z/",
+        gfs_storage_root="storage",
+        gfs_relative_path="gfs/20260513/12z/",
     )
     caplog.set_level(logging.WARNING)
 
@@ -212,7 +214,7 @@ def _fake_meteo() -> dict[str, np.ndarray]:
     }
 
 
-def _write_manifest(path: Path, *, gfs_cycle: str, gfs_storage_path: str) -> None:
+def _write_manifest(path: Path, *, gfs_cycle: str, gfs_storage_root: str, gfs_relative_path: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "schema_version": "1.0",
@@ -221,7 +223,8 @@ def _write_manifest(path: Path, *, gfs_cycle: str, gfs_storage_path: str) -> Non
             "latest_successful_cycle": gfs_cycle,
             "latest_successful_fetched_at": "2026-05-14T08:00:00+00:00",
             "latest_successful_source_timestamp": None,
-            "storage_path": gfs_storage_path,
+            "storage_root": gfs_storage_root,
+            "relative_path": gfs_relative_path,
             "archive_slots": {"24h-back": None, "48h-back": None},
         },
         "cmems": None,

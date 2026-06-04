@@ -277,12 +277,17 @@ def _resolve_storage_paths(
                 manifest_cycle,
                 resolved_cycle,
             )
-        storage_path = gfs_block.get("storage_path")
-        if isinstance(storage_path, str):
-            gfs_storage_path = Path(storage_path)
-            logger.info("using GFS storage from manifest: %s", storage_path)
+        storage_root = gfs_block.get("storage_root")
+        relative_path = gfs_block.get("relative_path")
+        if isinstance(storage_root, str) and isinstance(relative_path, str):
+            gfs_storage_path = Path(storage_root) / relative_path
+            logger.info(
+                "using GFS storage from manifest: %s / %s",
+                storage_root,
+                relative_path,
+            )
             if require_existing and not gfs_storage_path.exists():
-                raise FileNotFoundError(f"manifest GFS storage_path does not exist: {gfs_storage_path}")
+                raise FileNotFoundError(f"manifest GFS path does not exist: {gfs_storage_path}")
 
     cmems_block = manifest.get("cmems")
     if isinstance(cmems_block, dict):

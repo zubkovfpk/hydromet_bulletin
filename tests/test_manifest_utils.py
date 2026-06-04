@@ -52,7 +52,8 @@ def test_validate_schema_accepts_full_gfs_example():
             "latest_successful_cycle": "2026-05-13T12Z",
             "latest_successful_fetched_at": "2026-05-13T16:42:18+00:00",
             "latest_successful_source_timestamp": "2026-05-13T12:00:00+00:00",
-            "storage_path": "storage/gfs/20260513/12z/",
+            "storage_root": "data/storage/gfs",
+            "relative_path": "gfs/20260513/12z/",
             "archive_slots": {
                 "24h-back": None,
                 "48h-back": None,
@@ -62,6 +63,42 @@ def test_validate_schema_accepts_full_gfs_example():
     }
 
     assert validate_schema(manifest) == []
+
+
+def test_validate_schema_rejects_gfs_missing_storage_root():
+    manifest = {
+        "schema_version": "1.0",
+        "updated_at": "2026-05-13T12:00:00+00:00",
+        "gfs": {
+            "latest_successful_cycle": "2026-05-13T12Z",
+            "latest_successful_fetched_at": "2026-05-13T16:42:18+00:00",
+            "latest_successful_source_timestamp": None,
+            "storage_root": "",
+            "relative_path": "gfs/20260513/12z/",
+            "archive_slots": {"24h-back": None, "48h-back": None},
+        },
+        "cmems": None,
+    }
+    errors = validate_schema(manifest)
+    assert any("gfs.storage_root" in e for e in errors)
+
+
+def test_validate_schema_rejects_gfs_invalid_relative_path():
+    manifest = {
+        "schema_version": "1.0",
+        "updated_at": "2026-05-13T12:00:00+00:00",
+        "gfs": {
+            "latest_successful_cycle": "2026-05-13T12Z",
+            "latest_successful_fetched_at": "2026-05-13T16:42:18+00:00",
+            "latest_successful_source_timestamp": None,
+            "storage_root": "data/storage/gfs",
+            "relative_path": "WRONG/path/",
+            "archive_slots": {"24h-back": None, "48h-back": None},
+        },
+        "cmems": None,
+    }
+    errors = validate_schema(manifest)
+    assert any("gfs.relative_path" in e for e in errors)
 
 
 def test_write_manifest_atomic_and_updates_timestamp(tmp_path):

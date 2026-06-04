@@ -54,7 +54,8 @@
         "latest_successful_cycle",
         "latest_successful_fetched_at",
         "latest_successful_source_timestamp",
-        "storage_path",
+        "storage_root",
+        "relative_path",
         "archive_slots"
       ],
       "properties": {
@@ -75,9 +76,13 @@
             {"type": "null"}
           ]
         },
-        "storage_path": {
+        "storage_root": {
           "type": "string",
-          "pattern": "^storage/gfs/\\d{8}/(00z|06z|12z|18z)/$"
+          "minLength": 1
+        },
+        "relative_path": {
+          "type": "string",
+          "pattern": "^gfs/\\d{8}/(00z|06z|12z|18z)/$"
         },
         "archive_slots": {
           "$ref": "#/$defs/archive_slots"

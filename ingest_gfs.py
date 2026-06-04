@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import argparse
 import configparser
-import json
 import logging
-import os
 import re
 import sys
 import time
@@ -14,7 +12,7 @@ from pathlib import Path
 from utils.archive_rotation import ArchiveRotationError, rotate_archive
 from utils.downloaders.gfs_downloader import GFSDownloader
 from utils.event_logger import log_event
-from utils.manifest import ManifestCorruptedError, read_manifest, validate_schema, write_manifest
+from utils.manifest import ManifestCorruptedError, read_manifest, write_manifest
 from utils.process_lock import ProcessLock
 
 
@@ -260,14 +258,15 @@ def _finalize_success(target_cycle_dt: datetime, target_cycle_str: str, logger: 
             "latest_successful_cycle": target_cycle_str,
             "latest_successful_fetched_at": now_iso,
             "latest_successful_source_timestamp": None,
-            "storage_path": _storage_path_to_schema_string(target_cycle_dt),
+            "storage_root": _storage_root_str(),
+            "relative_path": _relative_path_for_cycle(target_cycle_dt),
             "archive_slots": {
                 "24h-back": _slot_to_manifest(archive_slots["24h-back"], now_iso),
                 "48h-back": _slot_to_manifest(archive_slots["48h-back"], now_iso),
             },
         }
         MANIFEST_PATH.parent.mkdir(parents=True, exist_ok=True)
-        _write_manifest_with_config_storage_path(MANIFEST_PATH, manifest)
+        write_manifest(MANIFEST_PATH, manifest)
     except (ManifestCorruptedError, ValueError) as exc:
         _safe_log_event(
             logger,
@@ -293,7 +292,8 @@ def _finalize_success(target_cycle_dt: datetime, target_cycle_str: str, logger: 
         event="ingest_complete",
         target_cycle=target_cycle_str,
         result="success",
-        storage_path_written=_storage_path_to_schema_string(target_cycle_dt),
+        storage_root_written=_storage_root_str(),
+        relative_path_written=_relative_path_for_cycle(target_cycle_dt),
     )
     logger.info("GFS ingest completed for %s", target_cycle_str)
     return 0
@@ -420,34 +420,15 @@ def _path_to_manifest(path: Path) -> str:
     return str(path).replace("\\", "/")
 
 
-def _storage_path_to_schema_string(cycle_dt: datetime) -> str:
-    return _storage_path_str(STORAGE_GFS_ROOT, cycle_dt)
+def _storage_root_str() -> str:
+    """Return parent of STORAGE_GFS_ROOT as storage_root (ADR-002)."""
+    return str(STORAGE_GFS_ROOT.parent).replace("\\", "/").rstrip("/")
 
 
-def _storage_path_str(storage_root: Path, cycle_dt: datetime) -> str:
+def _relative_path_for_cycle(cycle_dt: datetime) -> str:
+    """Return relative_path for manifest (ADR-002)."""
     cycle_utc = cycle_dt.astimezone(timezone.utc)
-    root_str = str(storage_root).replace("\\", "/").rstrip("/")
-    return f"{root_str}/{cycle_utc:%Y%m%d}/{cycle_utc:%H}z/"
-
-
-def _write_manifest_with_config_storage_path(path: Path, manifest: dict) -> None:
-    errors = validate_schema(manifest)
-    if not errors:
-        write_manifest(path, manifest)
-        return
-
-    if not errors or any("gfs.storage_path" not in error for error in errors):
-        raise ValueError("; ".join(errors))
-
-    # Known incompatibility between the formal ADR-001 pattern and config-driven storage root.
-    manifest["updated_at"] = datetime.now(timezone.utc).isoformat()
-    tmp_path = Path(f"{path}.tmp")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with tmp_path.open("w", encoding="utf-8") as f:
-        f.write(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp_path, path)
+    return f"gfs/{cycle_utc:%Y%m%d}/{cycle_utc:%H}z/"
 
 
 def _looks_like_timeout(exc: Exception) -> bool:

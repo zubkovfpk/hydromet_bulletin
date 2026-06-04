@@ -14,7 +14,8 @@ GFS_KEYS = {
     "latest_successful_cycle",
     "latest_successful_fetched_at",
     "latest_successful_source_timestamp",
-    "storage_path",
+    "storage_root",
+    "relative_path",
     "archive_slots",
 }
 CMEMS_KEYS = {
@@ -27,7 +28,7 @@ CMEMS_KEYS = {
 ARCHIVE_SLOT_KEYS = {"24h-back", "48h-back"}
 
 GFS_CYCLE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T(00|06|12|18)Z$")
-GFS_STORAGE_PATH_RE = re.compile(r"^storage/gfs/\d{8}/(00z|06z|12z|18z)/$")
+GFS_RELATIVE_PATH_RE = re.compile(r"^gfs/\d{8}/(00z|06z|12z|18z)/$")
 CMEMS_LAYER_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 CMEMS_STORAGE_PATH_RE = re.compile(r"^storage/cmems/\d{8}/$")
 
@@ -118,7 +119,8 @@ def _validate_gfs(value: Any, errors: list[str]) -> None:
         "gfs.latest_successful_source_timestamp",
         errors,
     )
-    _validate_pattern(value.get("storage_path"), GFS_STORAGE_PATH_RE, "gfs.storage_path", errors)
+    _validate_str_nonempty(value.get("storage_root"), "gfs.storage_root", errors)
+    _validate_pattern(value.get("relative_path"), GFS_RELATIVE_PATH_RE, "gfs.relative_path", errors)
     _validate_archive_slots(value.get("archive_slots"), "gfs.archive_slots", errors)
 
 
@@ -163,6 +165,11 @@ def _validate_required_and_additional(
 def _validate_pattern(value: Any, pattern: re.Pattern[str], label: str, errors: list[str]) -> None:
     if not isinstance(value, str) or pattern.fullmatch(value) is None:
         errors.append(f"{label} has invalid format")
+
+
+def _validate_str_nonempty(value: Any, label: str, errors: list[str]) -> None:
+    if not isinstance(value, str) or not value.strip():
+        errors.append(f"{label} must be a non-empty string")
 
 
 def _validate_utc_field(value: Any, label: str, errors: list[str]) -> None:
