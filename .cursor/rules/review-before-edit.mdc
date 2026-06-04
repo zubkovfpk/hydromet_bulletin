@@ -1,0 +1,37 @@
+---
+description: Review gate before code edits; catch spec/path contract bugs
+alwaysApply: true
+---
+
+# Review before edit
+
+## When the gate applies
+
+Before using Write, StrReplace, Delete, EditNotebook, or shell commands that modify tracked source/tests/config used by the pipeline:
+
+1. Present a **short plan** (files, intent, key behavior changes).
+2. Run a **spec/contract sanity check**, especially:
+   - Path composition: `Path(storage_root) / relative_path` must match real FS layout; watch for duplicated path segments (e.g. `gfs` in both root and relative_path).
+   - Manifest/schema field names vs consumers (producer vs reader).
+   - ADR/doc vs prompt spec mismatches — flag if the prompt spec would introduce an obvious bug even when followed literally.
+3. List **critical risks** and **obvious bugs** in plain language (or state "none identified").
+4. **Stop** — do not apply edits until the user replies with exactly one of:
+   - **как есть** — apply the plan as written (including prompt spec, even if risky).
+   - **исправь** — apply with fixes for flagged issues (user may add constraints in the same message).
+   - **отмена** — do not edit; answer questions or revise the plan only.
+
+## When the gate does NOT apply
+
+- Read-only work: explain, review, read docs/ADR, answer questions, `git status`/`diff`/`log`, grep/read/search.
+- User explicitly says: **без review**, **сразу в код**, or **применяй без остановки**.
+
+## After approval
+
+- **как есть**: implement as planned; mention residual risks briefly if any remain.
+- **исправь**: implement corrected version; note what changed vs the original plan.
+- **отмена**: no file edits in that turn unless the user starts a new edit request.
+
+## Language
+
+- Warnings and plan: Russian unless the user writes in English.
+- Keep the review block compact; do not block on minor style nits.

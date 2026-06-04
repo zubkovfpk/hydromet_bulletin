@@ -1,0 +1,46 @@
+---
+description: Manifest GFS path contract (storage_root + relative_path); ADR-002
+globs: ingest_gfs.py,forecast_main.py,utils/manifest.py,schemas/manifest_v1.json,tests/test_manifest_utils.py,tests/test_ingest_gfs_cli.py,tests/test_forecast_main_pipeline.py,docs/adr/002-storage-canon.md
+alwaysApply: false
+---
+
+# Manifest / paths contract (GFS)
+
+Applies when editing listed files. Extend this rule when new incident patterns appear.
+
+## Canonical GFS layout (ADR-002)
+
+| Field | Meaning | Example |
+|-------|---------|---------|
+| `storage_root` | **Parent** of configured GFS output dir (`STORAGE_GFS_ROOT.parent`), not the gfs leaf itself | `data/storage` |
+| `relative_path` | Deterministic suffix under that parent; pattern `^gfs/\d{8}/(00z\|06z\|12z\|18z)/$` | `gfs/20260513/12z/` |
+
+**Resolved path (consumer):**
+
+```text
+Path(storage_root) / relative_path
+→ data/storage/gfs/20260513/12z/
+```
+
+**Filesystem write root (producer):** `STORAGE_GFS_ROOT` from config (`[GFS_STORAGE].GFS_OUTPUT_DIR`), e.g. `data/storage/gfs` — same as `Path(storage_root) / "gfs"` when layout is standard.
+
+## Pre-edit checklist (flag before coding)
+
+1. **No segment doubling** — if `STORAGE_GFS_ROOT` already ends with `/gfs`, `storage_root` must **not** include `gfs`; that segment belongs only in `relative_path`.
+2. **Producer ≡ consumer** — `ingest_gfs` manifest write and `forecast_main._resolve_storage_paths` must resolve to the same path tests mkdir/create on disk.
+3. **Schema ≡ Python** — `schemas/manifest_v1.json` patterns must match `utils/manifest.py` regexes and `GFS_KEYS`.
+4. **Tests** — fixtures use `storage_root` + `relative_path`, not legacy `storage_path` on GFS block (CMEMS still uses `storage_path` until a separate DT).
+5. **Prompt vs ADR** — if a task prompt contradicts ADR-002 (e.g. `storage_root = GFS_OUTPUT_DIR` with `relative_path = gfs/...`), raise under the global review gate; do not silently implement the broken join.
+
+## Known anti-patterns (add rows here over time)
+
+| Anti-pattern | Symptom | Fix |
+|--------------|---------|-----|
+| `storage_root = STORAGE_GFS_ROOT` + `relative_path = gfs/...` | `.../gfs/gfs/YYYYMMDD/HHz/` | `storage_root = STORAGE_GFS_ROOT.parent` |
+| Single `storage_path` on GFS block | Schema/validate failures after DT-16-1 | Split to `storage_root` + `relative_path` |
+| Test mkdir only under `storage/gfs/...` while manifest uses doubled path | Passes until `require_existing=True` | mkdir at `Path(storage_root)/relative_path` |
+
+## References
+
+- ADR-002 (storage canon) when present under `docs/adr/`
+- ADR-001 for ingest/manifest lifecycle; cite by ID in code comments, not file paths
