@@ -86,6 +86,30 @@ def rotate_archive(
     return {"24h-back": newest_slot, "48h-back": older_slot}
 
 
+def rotate_archive_if_exists(
+    source: str,
+    current_storage_path: Path,
+    archive_root: Path,
+    logger: logging.Logger | None = None,
+) -> dict[str, Path | None]:
+    """
+    Rotate archive only if current_storage_path exists and is
+    non-empty. Returns empty slots dict on cold start (ADR-001 §3.2).
+    """
+    current_path = Path(current_storage_path)
+    if not current_path.exists() or not current_path.is_dir():
+        log = logger if logger is not None else logging.getLogger(__name__)
+        log.info("%s archive skipped (cold start): %s", source, current_path)
+        return {"24h-back": None, "48h-back": None}
+    try:
+        next(current_path.iterdir())
+    except StopIteration:
+        log = logger if logger is not None else logging.getLogger(__name__)
+        log.info("%s archive skipped (empty dir): %s", source, current_path)
+        return {"24h-back": None, "48h-back": None}
+    return rotate_archive(source, current_storage_path, archive_root, logger)
+
+
 def _ensure_non_empty_directory(path: Path) -> None:
     if not path.exists():
         raise ArchiveRotationError(f"nothing to rotate: {path} does not exist")

@@ -81,7 +81,8 @@ def test_run_ingest_force_overrides_skip(monkeypatch):
 
     assert exit_code == 2
     assert len(attempts) == 1
-    assert events[0]["event"] == "poll_attempt"
+    assert events[0]["event"] == "archive_rotation"
+    assert events[1]["event"] == "poll_attempt"
 
 
 def test_run_ingest_success_writes_manifest_and_rotates_archive(monkeypatch, tmp_path):
@@ -96,14 +97,14 @@ def test_run_ingest_success_writes_manifest_and_rotates_archive(monkeypatch, tmp
     monkeypatch.setattr(ingest_gfs, "_attempt_download", lambda *args, **kwargs: ("success", 200, 123))
     _make_non_empty_dir(slot_path)
 
-    def fake_rotate_archive(**kwargs):
+    def fake_rotate_archive_if_exists(**kwargs):
         rotate_calls.append(kwargs)
         return {"24h-back": Path("a"), "48h-back": None}
 
     def fake_write_manifest(path, data):
         write_calls.append((Path(path), data))
 
-    monkeypatch.setattr(ingest_gfs, "rotate_archive", fake_rotate_archive)
+    monkeypatch.setattr(ingest_gfs, "rotate_archive_if_exists", fake_rotate_archive_if_exists)
     monkeypatch.setattr(ingest_gfs, "write_manifest", fake_write_manifest)
 
     exit_code = ingest_gfs.run_ingest(
@@ -127,11 +128,46 @@ def test_run_ingest_success_writes_manifest_and_rotates_archive(monkeypatch, tmp
     assert written_manifest["gfs"]["relative_path"] == "gfs/20260513/12z/"
     assert set(written_manifest["gfs"]["archive_slots"]["24h-back"]) == {"path", "archived_at"}
     assert [(event["event"], event["result"]) for event in events] == [
-        ("poll_attempt", "success"),
         ("archive_rotation", "success"),
+        ("poll_attempt", "success"),
         ("manifest_update", "success"),
         ("ingest_complete", "success"),
     ]
+
+
+def test_run_ingest_rotates_before_download(monkeypatch, tmp_path):
+    """rotate_archive_if_exists must be called before _attempt_download."""
+    call_order: list[str] = []
+    target_cycle = datetime(2026, 5, 13, 12, tzinfo=timezone.utc)
+    slot_path = _patch_ingest_paths(monkeypatch, tmp_path, target_cycle)
+    _make_non_empty_dir(slot_path)
+    monkeypatch.setattr(ingest_gfs, "log_event", lambda **kwargs: None)
+    monkeypatch.setattr(ingest_gfs, "read_manifest", lambda path: _manifest(None))
+    monkeypatch.setattr(ingest_gfs, "write_manifest", lambda path, data: None)
+
+    def fake_rotate(**kwargs):
+        call_order.append("rotate")
+        return {"24h-back": None, "48h-back": None}
+
+    def fake_download(*args, **kwargs):
+        call_order.append("download")
+        return ("success", 200, 123)
+
+    monkeypatch.setattr(ingest_gfs, "rotate_archive_if_exists", fake_rotate)
+    monkeypatch.setattr(ingest_gfs, "_attempt_download", fake_download)
+
+    ingest_gfs.run_ingest(
+        target_cycle,
+        max_retries=1,
+        retry_interval_min=0,
+        force=False,
+        dry_run=False,
+        logger=_logger(),
+    )
+
+    assert call_order == ["rotate", "download"], (
+        f"Expected rotate before download, got: {call_order}"
+    )
 
 
 def test_run_ingest_success_but_storage_path_missing_returns_2(monkeypatch, tmp_path):
@@ -143,7 +179,11 @@ def test_run_ingest_success_but_storage_path_missing_returns_2(monkeypatch, tmp_
     monkeypatch.setattr(ingest_gfs, "read_manifest", lambda path: _manifest(None))
     monkeypatch.setattr(ingest_gfs, "log_event", lambda **kwargs: events.append(kwargs))
     monkeypatch.setattr(ingest_gfs, "_attempt_download", lambda *args, **kwargs: ("success", 200, 50))
-    monkeypatch.setattr(ingest_gfs, "rotate_archive", lambda *args, **kwargs: rotate_calls.append((args, kwargs)))
+    monkeypatch.setattr(
+        ingest_gfs,
+        "rotate_archive_if_exists",
+        lambda *args, **kwargs: rotate_calls.append((args, kwargs)),
+    )
     monkeypatch.setattr(ingest_gfs, "write_manifest", lambda *args, **kwargs: write_calls.append((args, kwargs)))
 
     exit_code = ingest_gfs.run_ingest(
@@ -156,7 +196,7 @@ def test_run_ingest_success_but_storage_path_missing_returns_2(monkeypatch, tmp_
     )
 
     assert exit_code == 2
-    assert rotate_calls == []
+    assert len(rotate_calls) == 1
     assert write_calls == []
     assert events[-1]["event"] == "ingest_failed"
     assert events[-1]["result"] == "storage_path_missing"
@@ -173,10 +213,10 @@ def test_run_ingest_rotation_error_returns_2(monkeypatch, tmp_path):
     monkeypatch.setattr(ingest_gfs, "_attempt_download", lambda *args, **kwargs: ("success", 200, 50))
     monkeypatch.setattr(ingest_gfs, "write_manifest", lambda *args, **kwargs: write_calls.append((args, kwargs)))
 
-    def fail_rotate_archive(**kwargs):
+    def fail_rotate_archive_if_exists(**kwargs):
         raise ingest_gfs.ArchiveRotationError("3+ slots")
 
-    monkeypatch.setattr(ingest_gfs, "rotate_archive", fail_rotate_archive)
+    monkeypatch.setattr(ingest_gfs, "rotate_archive_if_exists", fail_rotate_archive_if_exists)
 
     exit_code = ingest_gfs.run_ingest(
         target_cycle,
@@ -215,12 +255,12 @@ def test_run_ingest_manifest_corrupted_on_final_read_returns_2(monkeypatch, tmp_
             raise value
         return value
 
-    def fake_rotate_archive(**kwargs):
+    def fake_rotate_archive_if_exists(**kwargs):
         rotate_calls.append(kwargs)
         return {"24h-back": Path("a"), "48h-back": None}
 
     monkeypatch.setattr(ingest_gfs, "read_manifest", fake_read_manifest)
-    monkeypatch.setattr(ingest_gfs, "rotate_archive", fake_rotate_archive)
+    monkeypatch.setattr(ingest_gfs, "rotate_archive_if_exists", fake_rotate_archive_if_exists)
 
     exit_code = ingest_gfs.run_ingest(
         target_cycle,
@@ -248,7 +288,7 @@ def test_run_ingest_write_manifest_value_error_returns_2(monkeypatch, tmp_path):
     monkeypatch.setattr(ingest_gfs, "_attempt_download", lambda *args, **kwargs: ("success", 200, 50))
     monkeypatch.setattr(
         ingest_gfs,
-        "rotate_archive",
+        "rotate_archive_if_exists",
         lambda **kwargs: {"24h-back": Path("a"), "48h-back": None},
     )
 
@@ -282,7 +322,7 @@ def test_run_ingest_success_event_replaces_stub(monkeypatch, tmp_path):
     monkeypatch.setattr(ingest_gfs, "_attempt_download", lambda *args, **kwargs: ("success", 200, 50))
     monkeypatch.setattr(
         ingest_gfs,
-        "rotate_archive",
+        "rotate_archive_if_exists",
         lambda **kwargs: {"24h-back": Path("a"), "48h-back": None},
     )
     monkeypatch.setattr(ingest_gfs, "write_manifest", lambda path, data: None)
@@ -412,7 +452,7 @@ def _manifest(latest_cycle: str | None) -> dict[str, Any]:
             "latest_successful_cycle": latest_cycle,
             "latest_successful_fetched_at": "2026-05-13T16:42:18+00:00",
             "latest_successful_source_timestamp": "2026-05-13T12:00:00+00:00",
-            "storage_root": "storage/gfs",
+            "storage_root": "storage",
             "relative_path": "gfs/20260513/12z/",
             "archive_slots": {"24h-back": None, "48h-back": None},
         },

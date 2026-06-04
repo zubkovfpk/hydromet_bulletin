@@ -9,7 +9,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from utils.archive_rotation import ArchiveRotationError, rotate_archive
+from utils.archive_rotation import ArchiveRotationError, rotate_archive_if_exists
 from utils.downloaders.gfs_downloader import GFSDownloader
 from utils.event_logger import log_event
 from utils.manifest import ManifestCorruptedError, read_manifest, write_manifest
@@ -175,6 +175,39 @@ def run_ingest(
         logger.info("GFS ingest skipped: cycle already ingested (%s)", target_cycle_str)
         return 0
 
+    # ADR-001 §3.2: rotate before download
+    archive_start = time.monotonic()
+    try:
+        archive_slots = rotate_archive_if_exists(
+            source="gfs",
+            current_storage_path=_storage_path_for_cycle(target_cycle_dt),
+            archive_root=ARCHIVE_GFS_ROOT,
+            logger=logger,
+        )
+    except ArchiveRotationError as exc:
+        _safe_log_event(
+            logger,
+            "archive_rotation",
+            source="gfs",
+            event="archive_rotation",
+            target_cycle=target_cycle_str,
+            result="rotation_error",
+            error_message=str(exc),
+        )
+        logger.error(
+            "GFS archive rotation failed before download for %s: %s",
+            target_cycle_str,
+            exc,
+        )
+        return 2
+    log_event(
+        source="gfs",
+        event="archive_rotation",
+        target_cycle=target_cycle_str,
+        result="success",
+        duration_ms=_elapsed_ms(archive_start),
+    )
+
     for attempt in range(1, max_retries + 1):
         result, http_status, latency_ms = _attempt_download(
             target_cycle_dt,
@@ -192,7 +225,7 @@ def run_ingest(
         )
 
         if result == "success":
-            return _finalize_success(target_cycle_dt, target_cycle_str, logger)
+            return _finalize_success(target_cycle_dt, target_cycle_str, logger, archive_slots)
 
         if attempt < max_retries:
             time.sleep(retry_interval_min * 60)
@@ -207,8 +240,13 @@ def run_ingest(
     return 2
 
 
-def _finalize_success(target_cycle_dt: datetime, target_cycle_str: str, logger: logging.Logger) -> int:
-    """Finalize ADR-001 §5.1 successful GFS ingest with archive, manifest, and events."""
+def _finalize_success(
+    target_cycle_dt: datetime,
+    target_cycle_str: str,
+    logger: logging.Logger,
+    archive_slots: dict[str, Path | None],
+) -> int:
+    """Finalize ADR-001 §5.1 successful GFS ingest with manifest and events."""
     storage_path = _storage_path_for_cycle(target_cycle_dt)
     if not storage_path.exists():
         log_event(
@@ -220,35 +258,6 @@ def _finalize_success(target_cycle_dt: datetime, target_cycle_str: str, logger: 
         )
         logger.error("GFS ingest failed for %s: storage path missing: %s", target_cycle_str, storage_path)
         return 2
-
-    archive_start = time.monotonic()
-    try:
-        archive_slots = rotate_archive(
-            source="gfs",
-            current_storage_path=storage_path,
-            archive_root=ARCHIVE_GFS_ROOT,
-            logger=logger,
-        )
-    except ArchiveRotationError as exc:
-        _safe_log_event(
-            logger,
-            "archive_rotation",
-            source="gfs",
-            event="archive_rotation",
-            target_cycle=target_cycle_str,
-            result="rotation_error",
-            error_message=str(exc),
-        )
-        logger.error("GFS archive rotation failed for %s: %s", target_cycle_str, exc)
-        return 2
-
-    log_event(
-        source="gfs",
-        event="archive_rotation",
-        target_cycle=target_cycle_str,
-        result="success",
-        duration_ms=_elapsed_ms(archive_start),
-    )
 
     manifest_start = time.monotonic()
     try:
