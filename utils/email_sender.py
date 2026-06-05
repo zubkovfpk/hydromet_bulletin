@@ -76,7 +76,8 @@ def send_bulletin(
         encoders.encode_base64(part)
         part.add_header(
             "Content-Disposition",
-            f'attachment; filename*=UTF-8\'\'{filename}'
+            "attachment",
+            filename=("utf-8", "", filename),
         )
         msg.attach(part)
     except FileNotFoundError:
