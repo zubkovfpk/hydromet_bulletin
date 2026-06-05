@@ -10,6 +10,7 @@ forecast_morning.py
 import argparse
 import configparser
 import logging
+import logging.handlers
 import time
 import warnings
 import numpy as np
@@ -100,7 +101,7 @@ def _configure_logging(cfg: configparser.ConfigParser) -> None:
     base_dir = cfg.get("General", "basedir", fallback=".")
     log_file = (
         cfg.get("General", "log_file", fallback="").strip()
-        or cfg.get("Logging", "log_file", fallback="").strip()
+        or cfg.get("LOGGING", "log_file", fallback="").strip()
     )
     log_path = Path(log_file) if log_file else Path(base_dir) / "logs" / "hydromet.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -111,7 +112,9 @@ def _configure_logging(cfg: configparser.ConfigParser) -> None:
         datefmt="%Y-%m-%d %H:%M:%S",
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler(log_path, encoding="utf-8"),
+            logging.handlers.RotatingFileHandler(
+                log_path, maxBytes=5 * 1024 * 1024, backupCount=7, encoding="utf-8"
+            ),
         ],
         force=True,
     )

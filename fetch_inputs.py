@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import configparser
 import logging
+import logging.handlers
 import sys
 from pathlib import Path
 
@@ -25,7 +26,9 @@ def _setup_logging() -> logging.Logger:
         datefmt="%Y-%m-%d %H:%M:%S",
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler(LOG_PATH, encoding="utf-8"),
+            logging.handlers.RotatingFileHandler(
+                LOG_PATH, maxBytes=5 * 1024 * 1024, backupCount=7, encoding="utf-8"
+            ),
         ],
     )
     return logging.getLogger(__name__)
