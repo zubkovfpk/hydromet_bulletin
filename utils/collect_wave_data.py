@@ -274,11 +274,17 @@ def collect_wave_data(
     )
 
     # Агрегация: 8 шагов × 3ч = 24ч → 5 суток
+    # np.errstate: suppress Mean of empty slice when
+    # Hwave has fewer timesteps than expected (DT-14-S)
     Wave = np.full((*Hwave.shape[:2], NOMINAL_WAVE_DAYS), np.nan)
-    for d in range(NOMINAL_WAVE_DAYS):
-        s = d * CMEMS_WAVE_TIMESTEPS_PER_DAY
-        e = s + CMEMS_WAVE_TIMESTEPS_PER_DAY
-        Wave[:, :, d] = np.nanmean(Hwave[:, :, s:e], axis=2)
+    with np.errstate(all="ignore"):
+        for d in range(NOMINAL_WAVE_DAYS):
+            s = d * CMEMS_WAVE_TIMESTEPS_PER_DAY
+            e = s + CMEMS_WAVE_TIMESTEPS_PER_DAY
+            slab = Hwave[:, :, s:e]
+            if slab.size == 0 or not np.any(np.isfinite(slab)):
+                continue
+            Wave[:, :, d] = np.nanmean(slab, axis=2)
 
     # Применяем маску
     Wave[~np.broadcast_to(mask[:, :, np.newaxis], Wave.shape)] = np.nan

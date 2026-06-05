@@ -136,7 +136,7 @@ def test_collect_wave_data_fill_value_decoded_to_nan(tmp_path, monkeypatch):
     assert np.nanmin(wave) > -1000.0
 
 
-def test_collect_wave_data_partial_set_produces_nan_layers(tmp_path, monkeypatch):
+def test_collect_wave_data_partial_set_produces_nan_layers(tmp_path, monkeypatch, recwarn):
     run_date = "20260421"
     nested = tmp_path / "data" / "storage" / "cmems" / "product" / "2026" / "04"
     for i in range(2):
@@ -151,6 +151,7 @@ def test_collect_wave_data_partial_set_produces_nan_layers(tmp_path, monkeypatch
         run_date=run_date,
         cmems_storage_subdir="data/storage/cmems",
     )
+    assert len(recwarn) == 0, f"Unexpected warnings: {recwarn.list}"
     assert np.isnan(wave[:, :, 2]).all()
     report = validate_wave_output(wave, start_date, end_date, strict=True, forecast_hours=120, tol_hours=3)
     assert any(issue["code"] == "all_nan_layer" for issue in report["errors"])
