@@ -2839,3 +2839,42 @@ Session 14 closed.
 - Archive rotation semantics (DT-16-2, S17.1).
 - forecast_main start_time ceil (DT-16-3, S17.2).
 - strict-manifest mode (DT-16-4, S17.2).
+
+---
+
+## Итоги S17 (2026-06-04..05)
+
+**Основные события**
+
+- DT-16-1: manifest.gfs split на storage_root + relative_path.
+  Hotfix: storage_root = STORAGE_GFS_ROOT.parent (без /gfs).
+  ADR-002 создан.
+- DT-16-2: archive rotation перенесена до download.
+- DT-16-3: forecast_main использует цикл из manifest
+  (не floor от request_time); collect_meteo_data получает
+  gfs_data_dir напрямую из manifest.
+- DT-14-U: CMEMS credentials восстановлены (email вместо
+  username в copernicusmarine.login). Бюллетень доставлен.
+  Имя вложения с кириллицей исправлено (DT-17-2, RFC 2047).
+- DT-16-4: --strict-manifest flag, exit 2 при устаревшем
+  или отсутствующем manifest.
+- DT-17-1: polling loop в forecast_main — auto-trigger
+  ingest_gfs.py при устаревшем manifest. EXIT_TIMEOUT=5.
+  ADR-003 создан. Тесты: mock time.monotonic/sleep.
+- DT-14-S: np.errstate + пустой срез → NaN без warning.
+- DT-08-1/3: [LOGGING] case + RotatingFileHandler.
+- DT-13-6: legacy/reserved keys в config.example.ini.
+
+**Ключевые технические решения**
+
+- storage_root = STORAGE_GFS_ROOT.parent (не сам root с /gfs).
+- Manifest является единственным критерием готовности данных
+  в polling loop (ADR-003).
+- EXIT_TIMEOUT = 5 (не 3, чтобы не конфликтовать с SMTP failure).
+- CMEMS credentials: использовать email аккаунта, не username.
+
+**Что не закрыто → S18**
+
+- DT-14-V: hard-cut legacy runners.
+- DT-17-3: CMEMS auto-trigger в polling loop.
+- DT-08-5: flaky test_retry_on_bad_url.

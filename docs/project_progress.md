@@ -436,7 +436,8 @@ filename-конвенция `.docx` и подготовка к боевой emai
 
 ## Сессия 17 — план
 
-**Дата открытия:** 2026-05-14.
+**Дата открытия:** 2026-06-04.
+**Дата закрытия:** 2026-06-05.
 
 **Состав задач (по приоритету)**
 
@@ -465,6 +466,77 @@ filename-конвенция `.docx` и подготовка к боевой emai
 - Hard-cut legacy runners (DT-14-V) — S18.
 - Merge `feature/bulletin-generation` в master — отдельно.
 - Cron-bridge / Docker scheduler — S18.
+
+---
+
+## Итоги Сессии 17 (2026-06-04..05)
+
+**Закрытые задачи**
+
+- DT-16-1 closed (`526af0d`) — manifest.gfs: storage_root +
+  relative_path split (ADR-002).
+- DT-16-2 closed (`5742618`) — archive rotation before download
+  (ADR-001 §3.2).
+- DT-16-3 closed (`26e5c40`) — forecast_main manifest cycle +
+  direct storage path in pipeline (ADR-001 §2, ADR-002).
+- DT-14-U closed — end-to-end ingest NOMADS + SMTP verify:
+  бюллетень отправлен на zubkovfpk@gmail.com, VPN отключён.
+- DT-17-2 closed (`9ea704e`) — RFC 2047 кириллица в имени
+  вложения email.
+- DT-16-4 closed (`59fe717`) — strict-manifest mode
+  (--strict-manifest flag, ADR-001 §2).
+- DT-14-S closed (`172d1e6`) — RuntimeWarning Mean of empty
+  slice в collect_wave_data.py устранён.
+- DT-17-1 closed (`017afbd`) — on-demand polling loop +
+  auto-trigger ingest_gfs.py (ADR-003, ADR-001 §13.3).
+- DT-08-1, DT-08-3 closed (`42fb832`) — [LOGGING] case fix +
+  RotatingFileHandler.
+- DT-13-6 closed (`a06a47e`) — legacy/reserved keys в
+  config.example.ini.
+
+**Новые ADR**
+
+- ADR-002: storage canon owner of truth = config.ini.
+- ADR-003: on-demand ingest orchestration in forecast_main.
+
+**Новые DT (обнаружены в S17, переносятся в S18)**
+
+- DT-17-1: закрыт в S17.
+- DT-17-2: закрыт в S17.
+- DT-17-3: forecast_main polling loop — CMEMS ingest
+  не автоматизирован (только GFS).
+
+**Регрессионная база на закрытие S17**
+
+- 192 passed, 4 skipped, 1 xfailed, 1 failed (DT-08-5 known flaky).
+- 0 warnings.
+
+**End-to-end результат**
+
+- ingest_gfs.py: NOMADS cycle 2026-06-05T00Z, 40/40 файлов.
+- forecast_main.py: бюллетень Прогноз_20260605_1033_req-1054.docx
+  создан и доставлен по SMTP.
+- manifest контракт ADR-002 соблюдён:
+  storage_root=data/storage, relative_path=gfs/20260605/00z/.
+
+## Сессия 18 — план
+
+**Дата открытия:** TBD.
+
+**Состав задач (по приоритету)**
+
+- 18.1 — DT-14-V: hard-cut legacy runners
+  (forecast_morning.py, forecast_evening.py).
+- 18.2 — DT-17-3: CMEMS ingest auto-trigger в polling loop.
+- 18.3 — DT-08-5: fix flaky test_retry_on_bad_url
+  (GFS skip exists при наличии локального кэша).
+- 18.4 — Cron-bridge: 2×/сутки автоматическая доставка
+  бюллетеня (bridge до HTTP API S20+).
+
+**Out of scope S18**
+
+- Merge feature/bulletin-generation в master — отдельно.
+- HTTP API — S20+.
 
 **Решения по политике сессии**
 

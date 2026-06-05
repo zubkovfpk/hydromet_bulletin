@@ -359,28 +359,30 @@ python forecast_main.py --cycle {morning|evening}
 - **DT-13-2** ✅ **Закрыт по scope (сессия 13, 8055651); insufficient for full E2E — см. DT-13-3**: `_resolve_run_date_for_dry_run`: explicit `--date` отключает fallback; без `--date` — today (UTC) → fallback today-1 → иначе `FileNotFoundError`; проверка через `_discover_cmems_nc_files` — только CMEMS (GFS не проверяется).
 - **DT-13-3** ✅ **Закрыт (сессия 14, 90523af)**: date policy теперь учитывает GFS availability check + fallback today-1 при отсутствии GFS за today.
 - **DT-13-4** ✅ **Закрыт (сессия 14, bd70c79 + 6efa10e)**: storage layout migration (meteo-side) + CMEMS wave contract/discovery (wave-side).
-- **DT-13-6** ⚠️ **Частично закрыт (сессия 14, audit verdict)**: выявлены мёртвые ключи; решение B: оставить как `legacy/reserved` с пометкой в docs; cleanup конфига — отдельный sweep при необходимости.
+- **DT-13-6** ✅ **closed (S17, a06a47e)**: legacy/reserved keys помечены в `config.example.ini`.
 - **DT-14-V**: unified `forecast_main.py` CLI — **near-complete (final on hard-cut S18)**. Закрыта ingestion + deprecation (15.D.3/D.4), pipeline + .docx (15.E.1), email + exit codes (15.E.2); финальная пометка — на closeout S16/S18.
-- **DT-14-U**: email delivery verification — **deferred (S17.1 prerequisite + manual verify)**. Заблокирован DT-16-1 (storage canon alignment).
+- **DT-14-U**: email delivery verification — **closed (S17, 9ea704e)**.
 - **DT-14-T**: `.docx` filename convention — **closed (15.D.4, `526e549`)**.
-- **DT-14-S**: `RuntimeWarning: Mean of empty slice` от `nanmean` в `collect_wave_data.py` — parking lot, без изменений.
+- **DT-14-S**: `RuntimeWarning: Mean of empty slice` от `nanmean` в `collect_wave_data.py` — **closed (S17, 172d1e6)**.
 - **DT-14-Y**: exit code propagation в forecast runner — **closed (15.E.2, `4083d37`)**.
 - **DT-14-Z**: scheduled ingestion + archive rotation — **closed (15.D.3-2, `f9fb17a`; semantics → DT-16-2)**.
-- **DT-16-1**: manifest.gfs.storage_path contract alignment — **open (S17.1)**.
-- **DT-16-2**: archive rotation semantics (before vs after download) — **open (S17.1)**.
-- **DT-16-3**: forecast_main start_time ceil per ADR-001 — **open (S17.2)**.
-- **DT-16-4**: strict-manifest mode in forecast_main — **open (S17.2)**.
+- **DT-16-1**: manifest.gfs.storage_path contract alignment — **closed (S17, 526af0d)**.
+- **DT-16-2**: archive rotation semantics (before vs after download) — **closed (S17, 5742618)**.
+- **DT-16-3**: forecast_main start_time ceil per ADR-001 — **closed (S17, 26e5c40)**.
+- **DT-16-4**: strict-manifest mode in forecast_main — **closed (S17, 59fe717)**.
 - **DT-16-5**: README cleanup of legacy operational commands — **closed (15.E.3, `0760a3f`)**.
 - **Normalizing/preprocessing layer для GFS**: после v1, если прямой переход `gfs_downloader` → `collect_meteo_data` останется неудобным.
 - **Downstream validation перед `doc_builder.py`**: day-level проверка сформированных диапазонов (`wind_min ≤ wind_max` и т.д.); не блокирует v1.
 - **Soft quality rules**: физические диапазоны, NaN ratio thresholds, sanity checks для precipitation — warning-only layer после MVP.
 - **DT-07-1 — явный выбор GFS cycle для bulletin generation**: перейти на CLI-параметр `--cycle` в `forecast_morning.py` / `forecast_evening.py`; целевая policy — CLI-параметр имеет приоритет над значением по умолчанию из конфига. Текущая временная policy (первый элемент `GFS_CYCLES`) сохраняется как fallback. Реализовывать **отдельной задачей / отдельным PR**, вне scope адаптации processing layer. Этап: сессия 8.
-- **DT-08-1 — регистр `[Logging]` vs `[LOGGING]` в configparser**: `_configure_logging()` ищет секцию `[Logging]`, в `config.example.ini` секция называется `[LOGGING]`; `configparser` чувствителен к регистру секций — feature `log_file` из конфига не работает. Приоритет: низкий. Этап: сессия 9.
+- **DT-08-1 — регистр `[Logging]` vs `[LOGGING]` в configparser**: **closed (S17, 42fb832)**.
 - **DT-08-2 — одновременная запись в `hydromet.log`**: cron-пересечение morning + evening, один файл — строки могут чередоваться. Приоритет: средний. Этап: сессия 9.
-- **DT-08-3 — ротация логов**: `FileHandler` без ограничения; решение: `RotatingFileHandler(maxBytes=5MB, backupCount=7)`. Приоритет: средний. Этап: сессия 9.
+- **DT-08-3 — ротация логов**: **closed (S17, 42fb832)**.
 - **DT-08-4 — права `/app/logs/` в Dockerfile**: процесс не под root — `mkdir` может дать `PermissionError`. Решение: `RUN mkdir -p /app/logs && chown ...`. Приоритет: средний. Этап: сессия 9.
 - **DT-08-6 — unit-тест `shapefile_dir=None` fallback**: нет проверки дефолтного пути; 1 unit-тест в `tests/test_processing_layout_paths.py`. Приоритет: низкий. Этап: сессия 9.
 - **DT-08-7 — keyword-only сигнатура `collect_*`**: `shapefile_dir` — второй positional-параметр; добавить `*` в сигнатуры для keyword-only принудительно. Приоритет: низкий. Этап: сессия 9.
+- **DT-17-3**: CMEMS ingest не автоматизирован в polling loop
+  forecast_main.py — только GFS. Приоритет: средний. S18.
 
 ## 10. Инструкция для AI-ассистента
 
@@ -508,15 +510,15 @@ git push origin master
 - **DT-13-2** ✅ **Закрыт по scope (сессия 13, 8055651)**: CMEMS-only fallback; GFS не проверяется → DT-13-3.
 - **DT-13-3** ✅ **Закрыт (сессия 14, 90523af)**: dry-run date policy учитывает GFS availability check + fallback today-1.
 - **DT-13-4** ✅ **Закрыт (сессия 14, bd70c79 + 6efa10e)**: meteo-side `results_subdir` migration + wave-side CMEMS contract/discovery.
-- **DT-13-6** ⚠️ **Частично закрыт (sweep, audit verdict в сессии 14):** `files_per_cycle` и ряд ключей в `[CMEMS_SOURCES]` оказались мёртвыми (не читаются кодом). Решение **B**: оставить как `legacy/reserved` с пометкой в docs; cleanup конфига — отдельная задача при необходимости.
+- **DT-13-6** ✅ **closed (S17, a06a47e)**: legacy/reserved keys помечены в `config.example.ini`.
 - **Config legacy/reserved keys (DT-13-6, решение B):** ключи `cmems_auth_method`, `cmems_token`, `cmems_subdataset_template`, `cmems_dynamic_path_mask`, `cmems_product_path` (в `[CMEMS_SOURCES]`) и `files_per_cycle` (в `[CMEMS_FORECAST]`) считаются `legacy/reserved`: присутствуют для совместимости/будущих расширений, но текущим кодом не читаются.
 - **Normalizing/preprocessing layer для GFS**: после v1, если прямой переход `gfs_downloader` → `collect_meteo_data` останется неудобным.
 - **Downstream validation перед `doc_builder.py`**: day-level проверка сформированных диапазонов (`wind_min ≤ wind_max` и т.д.); не блокирует v1.
 - **Soft quality rules**: физические диапазоны, NaN ratio thresholds, sanity checks для precipitation — warning-only layer после MVP `validate_outputs.py`.
 - **DT-07-1 — явный выбор GFS cycle**: CLI-параметр `--cycle` для `forecast_*.py`; CLI имеет приоритет над значением из `GFS_CYCLES`. Вне scope текущего change set (processing layer adaptation). Отдельная задача/PR. Этап: сессия 8.
-- **DT-08-1 — регистр `[Logging]` vs `[LOGGING]`**: `configparser` чувствителен к регистру секций; lookup `[Logging]` не находит `[LOGGING]` в конфиге. Feature `log_file` из конфига фактически нерабоча. Приоритет: низкий. Этап: сессия 9.
+- **DT-08-1 — регистр `[Logging]` vs `[LOGGING]`**: **closed (S17, 42fb832)**.
 - **DT-08-2 — одновременная запись в `hydromet.log`**: cron-пересечение morning + evening, один файл — строки могут чередоваться. Приоритет: средний. Этап: сессия 9.
-- **DT-08-3 — ротация логов**: `FileHandler` без ограничения; решение: `RotatingFileHandler(maxBytes=5MB, backupCount=7)`. Приоритет: средний. Этап: сессия 9.
+- **DT-08-3 — ротация логов**: **closed (S17, 42fb832)**.
 - **DT-08-4 — права `/app/logs/` в Dockerfile**: процесс не под root — `mkdir` может дать `PermissionError`. Решение: `RUN mkdir -p /app/logs && chown ...`. Приоритет: средний. Этап: сессия 9.
 - **DT-08-6 — unit-тест `shapefile_dir=None` fallback**: нет проверки дефолтного пути; 1 unit-тест в `tests/test_processing_layout_paths.py`. Приоритет: низкий. Этап: сессия 9.
 - **DT-08-7 — keyword-only сигнатура `collect_*`**: `shapefile_dir` — второй positional-параметр; добавить `*` в сигнатуры для keyword-only принудительно. Приоритет: низкий. Этап: сессия 9.
