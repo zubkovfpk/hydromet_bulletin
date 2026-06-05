@@ -11,8 +11,11 @@ import argparse
 import configparser
 import logging
 import re
+import subprocess
 import sys
-from datetime import date, datetime, time, timedelta, timezone
+import time
+from datetime import date, datetime, timedelta, timezone
+from datetime import time as dt_time
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -42,6 +45,7 @@ MANIFEST_PATH = Path("storage") / "manifest.json"
 MANIFEST_STALE_THRESHOLD_HOURS: int = 7
 CONFIG_PATH = Path("config.ini")
 DEFAULT_FORECAST_HOURS = 120
+EXIT_TIMEOUT = 5  # polling timeout (ADR-001 §13.3, DT-17-1)
 
 logger = logging.getLogger(__name__)
 email_sender: Any | None = None
@@ -113,6 +117,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "Exit 2 if manifest is missing, stale, or GFS storage path "
             "does not exist on disk. Disables fallback to floor-cycle "
             "disk search (ADR-001 §2, DT-16-4)."
+        ),
+    )
+    parser.add_argument(
+        "--no-ingest",
+        action="store_true",
+        default=False,
+        help=(
+            "Do not auto-trigger ingest_gfs.py even if manifest is "
+            "stale. Only poll manifest until ready or timeout "
+            "(ADR-003, DT-17-1)."
         ),
     )
     parser.add_argument(
@@ -192,7 +206,7 @@ def resolve_cmems_layer(request_time_utc: datetime) -> date:
     """
     request_utc = _ensure_utc_aware(request_time_utc)
     effective = request_utc - timedelta(hours=CMEMS_LAG_HOURS)
-    release_time = time(CMEMS_RELEASE_HOUR_UTC, 0)
+    release_time = dt_time(CMEMS_RELEASE_HOUR_UTC, 0)
 
     if effective.time() >= release_time:
         return effective.date()
@@ -390,6 +404,98 @@ def _check_strict_manifest(
         return 2
 
     return None
+
+
+def _manifest_is_ready(
+    manifest: dict[str, Any],
+    effective_gfs_cycle: datetime,
+) -> bool:
+    """
+    Return True if manifest contains a GFS cycle matching
+    effective_gfs_cycle (ADR-003 criterion of readiness).
+    """
+    cycle = _cycle_from_manifest(manifest)
+    return cycle is not None and cycle == effective_gfs_cycle
+
+
+def _trigger_ingest(
+    cycle: datetime,
+    logger: logging.Logger,
+) -> subprocess.Popen:
+    """
+    Launch ingest_gfs.py as a non-blocking subprocess (ADR-003).
+    Returns the Popen handle for later .poll()/.wait().
+    """
+    cycle_str = _format_cycle_for_events(cycle)
+    cmd = [
+        sys.executable,
+        str(Path(__file__).parent / "ingest_gfs.py"),
+        "--cycle",
+        cycle_str,
+    ]
+    logger.info("on-demand: launching ingest_gfs.py --cycle %s", cycle_str)
+    return subprocess.Popen(cmd)
+
+
+def _poll_until_ready(
+    *,
+    effective_gfs_cycle: datetime,
+    timeout_minutes: int,
+    polling_minutes: int,
+    no_ingest: bool,
+    logger: logging.Logger,
+) -> int | None:
+    """
+    Ensure manifest is ready for effective_gfs_cycle.
+    Returns None if ready, exit code otherwise (ADR-003).
+    """
+    manifest = _read_manifest_for_run(MANIFEST_PATH, dry_run=False, logger=logger)
+    if _manifest_is_ready(manifest, effective_gfs_cycle):
+        logger.info(
+            "on-demand: manifest already ready for %s",
+            _format_cycle_for_events(effective_gfs_cycle),
+        )
+        return None
+
+    ingest_proc: subprocess.Popen | None = None
+    if not no_ingest:
+        ingest_proc = _trigger_ingest(effective_gfs_cycle, logger)
+
+    deadline = time.monotonic() + timeout_minutes * 60
+    poll_interval = polling_minutes * 60
+
+    while time.monotonic() < deadline:
+        time.sleep(min(poll_interval, deadline - time.monotonic()))
+        manifest = _read_manifest_for_run(MANIFEST_PATH, dry_run=False, logger=logger)
+        if _manifest_is_ready(manifest, effective_gfs_cycle):
+            logger.info(
+                "on-demand: manifest ready for %s after polling",
+                _format_cycle_for_events(effective_gfs_cycle),
+            )
+            if ingest_proc is not None:
+                ingest_proc.wait(timeout=10)
+            return None
+
+        if ingest_proc is not None and ingest_proc.poll() is not None:
+            rc = ingest_proc.returncode
+            if rc != 0:
+                logger.error(
+                    "on-demand: ingest_gfs.py exited %d; "
+                    "manifest not ready (exit 2)",
+                    rc,
+                )
+                return 2
+
+    logger.error(
+        "on-demand: timeout after %dm waiting for manifest "
+        "(cycle=%s); exit %d",
+        timeout_minutes,
+        _format_cycle_for_events(effective_gfs_cycle),
+        EXIT_TIMEOUT,
+    )
+    if ingest_proc is not None and ingest_proc.poll() is None:
+        ingest_proc.terminate()
+    return EXIT_TIMEOUT
 
 
 def _read_manifest_for_run(path: Path, *, dry_run: bool, logger: logging.Logger) -> dict[str, Any]:
@@ -619,6 +725,22 @@ def main(argv: list[str] | None = None) -> int:
                 )
         else:
             effective_gfs_cycle = resolved_gfs_cycle
+
+        if not args.dry_run and not args.strict_manifest:
+            poll_exit = _poll_until_ready(
+                effective_gfs_cycle=effective_gfs_cycle,
+                timeout_minutes=args.timeout_minutes,
+                polling_minutes=args.polling_minutes,
+                no_ingest=args.no_ingest,
+                logger=logger,
+            )
+            if poll_exit is not None:
+                return poll_exit
+            manifest = _read_manifest_for_run(MANIFEST_PATH, dry_run=False, logger=logger)
+            manifest_cycle = _cycle_from_manifest(manifest)
+            if manifest_cycle is not None:
+                effective_gfs_cycle = manifest_cycle
+
         gfs_storage_path, cmems_storage_path = _resolve_storage_paths(
             manifest,
             effective_gfs_cycle,

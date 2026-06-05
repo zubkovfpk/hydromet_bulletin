@@ -943,6 +943,7 @@ DT переезжают между parking lot'ами сессий до закр
 | 2    | data unavailable     | GFS/CMEMS не отвечает; manifest corrupted; storage path missing; freshness threshold violated |
 | 3    | delivery failure     | SMTP недоступен, email не отправлен                                                           |
 | 4    | credentials issue    | Copernicus auth_error, SMTP auth_error (см. OQ-3)                                             |
+| 5    | polling timeout      | forecast_main не дождался готовности manifest за timeout_minutes (DT-17-1)                    |
 | >=10 | internal / unhandled | Неожиданные исключения, баги                                                                  |
 
 CI/cron-wrapper'ы должны различать 2 (ретраябельно) и >=10 (нужен разбор).

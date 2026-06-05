@@ -194,6 +194,7 @@ def _patch_pipeline(
         output_path.write_bytes(b"\x00")
         return str(output_path)
 
+    monkeypatch.setattr(forecast_main, "_poll_until_ready", lambda **kwargs: None)
     monkeypatch.setattr(forecast_main, "collect_meteo_data", fake_collect_meteo_data)
     monkeypatch.setattr(forecast_main, "collect_wave_data", fake_collect_wave_data)
     monkeypatch.setattr(forecast_main, "assert_valid_for_bulletin", fake_assert_valid_for_bulletin)
