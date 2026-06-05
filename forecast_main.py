@@ -38,6 +38,8 @@ GFS_CYCLES_UTC = (0, 6, 12, 18)
 CMEMS_RELEASE_HOUR_UTC = 12
 OUTPUT_DIR_DEFAULT = Path("output")
 MANIFEST_PATH = Path("storage") / "manifest.json"
+# DT-16-4: manifest is stale if cycle is older than this threshold
+MANIFEST_STALE_THRESHOLD_HOURS: int = 7
 CONFIG_PATH = Path("config.ini")
 DEFAULT_FORECAST_HOURS = 120
 
@@ -101,6 +103,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=(
             "Dry-run: resolve parameters, log pipeline plan, do NOT call processing "
             "utilities, do NOT write .docx, do NOT send email."
+        ),
+    )
+    parser.add_argument(
+        "--strict-manifest",
+        action="store_true",
+        default=False,
+        help=(
+            "Exit 2 if manifest is missing, stale, or GFS storage path "
+            "does not exist on disk. Disables fallback to floor-cycle "
+            "disk search (ADR-001 §2, DT-16-4)."
         ),
     )
     parser.add_argument(
@@ -329,6 +341,55 @@ def _cycle_from_manifest(manifest: dict[str, Any]) -> datetime | None:
         0,
         tzinfo=UTC_TZ,
     )
+
+
+def _check_strict_manifest(
+    manifest: dict[str, Any],
+    resolved_utc: datetime,
+    gfs_storage_path: Path | None,
+    logger: logging.Logger,
+) -> int | None:
+    """
+    In strict-manifest mode: validate manifest is present, fresh,
+    and storage path exists. Return exit code or None if OK.
+    DT-16-4, ADR-001 §2.
+    """
+    gfs_block = manifest.get("gfs")
+    if not isinstance(gfs_block, dict):
+        logger.error(
+            "strict-manifest: GFS block missing in manifest; "
+            "run ingest_gfs.py first (exit 2)"
+        )
+        return 2
+
+    manifest_cycle = _cycle_from_manifest(manifest)
+    if manifest_cycle is None:
+        logger.error(
+            "strict-manifest: cannot parse GFS cycle from manifest "
+            "(exit 2)"
+        )
+        return 2
+
+    age_hours = (resolved_utc - manifest_cycle).total_seconds() / 3600
+    if age_hours > MANIFEST_STALE_THRESHOLD_HOURS:
+        logger.error(
+            "strict-manifest: manifest GFS cycle %s is stale "
+            "(age=%.1fh > threshold=%dh); run ingest_gfs.py (exit 2)",
+            manifest_cycle.isoformat(),
+            age_hours,
+            MANIFEST_STALE_THRESHOLD_HOURS,
+        )
+        return 2
+
+    if gfs_storage_path is not None and not gfs_storage_path.exists():
+        logger.error(
+            "strict-manifest: GFS storage path does not exist: %s "
+            "(exit 2)",
+            gfs_storage_path,
+        )
+        return 2
+
+    return None
 
 
 def _read_manifest_for_run(path: Path, *, dry_run: bool, logger: logging.Logger) -> dict[str, Any]:
@@ -565,6 +626,15 @@ def main(argv: list[str] | None = None) -> int:
             logger,
             require_existing=not args.dry_run,
         )
+        if args.strict_manifest:
+            strict_exit = _check_strict_manifest(
+                manifest=manifest,
+                resolved_utc=resolved_utc,
+                gfs_storage_path=gfs_storage_path,
+                logger=logger,
+            )
+            if strict_exit is not None:
+                return strict_exit
         logger.info("Resolved GFS cycle UTC: %s", effective_gfs_cycle.isoformat())
         logger.info("Resolved CMEMS layer date: %s", resolved_cmems_layer.isoformat())
         logger.info("Resolved output filename (DT-14-T): %s", output_path)
