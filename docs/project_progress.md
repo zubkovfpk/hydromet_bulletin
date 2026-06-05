@@ -433,3 +433,44 @@ filename-конвенция `.docx` и подготовка к боевой emai
   расхождения regex `^storage/gfs/...` и реального canon
   `data/storage/gfs/...` — known issue, owner DT-16-1.
 - SMTP verify не выполнен — заблокирован DT-16-1.
+
+## Сессия 17 — план
+
+**Дата открытия:** 2026-05-14.
+
+**Состав задач (по приоритету)**
+
+- 17.1.A — DT-16-1: manifest.gfs.storage_path contract alignment.
+- 17.1.B — DT-16-2: archive rotation semantics (archive old
+  before download, не после).
+- 17.1.C — повторный end-to-end ingest на NOMADS:
+  `manifest.json` валиден через штатный `read_manifest()`,
+  без локального guard'а.
+- 17.1.D — DT-14-U: manual SMTP verify, фиксация результата в
+  `conversation_history.md` без секретов.
+- 17.2.A — DT-16-3: forecast_main start_time ceil per ADR-001.
+- 17.2.B — DT-16-4: strict-manifest mode в forecast_main.
+- (опционально) 17.2.C — collect_meteo_data / collect_wave_data
+  принимают storage_root.
+- (опционально) 17.3 — DT-14-S, DT-08-*, DT-13-6.
+
+**DoD сессии (минимум)**
+
+- DT-16-1, DT-16-2 closed.
+- DT-14-U closed (с реальным письмом на recipient_emails).
+- DT-16-3 closed.
+
+**Out of scope S17**
+
+- Hard-cut legacy runners (DT-14-V) — S18.
+- Merge `feature/bulletin-generation` в master — отдельно.
+- Cron-bridge / Docker scheduler — S18.
+
+**Решения по политике сессии**
+
+- Storage canon: владелец = `config.ini`; синхронизация regex
+  `manifest_v1.json` ↔ реальный canon делается в 17.1.A.
+- Prompts: используем минимальный вариант
+  («prompts/S17/<id>.md» как архив после успешного применения).
+- ADR-002 «storage canon owner of truth = config.ini» —
+  заводится в рамках 17.1.A.

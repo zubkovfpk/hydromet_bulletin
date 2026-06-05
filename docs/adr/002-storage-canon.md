@@ -15,15 +15,19 @@ Related: ADR-001 §3.1, DT-16-1
 ## Decision
 
 Manifest.gfs содержит два раздельных поля:
-- storage_root: абсолютный или относительный путь к корню
-  GFS-хранилища; значение берётся из config.ini
-  ([GFS_STORAGE].GFS_OUTPUT_DIR); владелец — config.ini.
+- storage_root: родительский каталог GFS-хранилища
+  (STORAGE_GFS_ROOT.parent); например `data/storage`.
+  Значение выводится из config.ini ([GFS_STORAGE].GFS_OUTPUT_DIR)
+  путём взятия `.parent`. Владелец — config.ini.
 - relative_path: детерминированный путь вида
   "gfs/YYYYMMDD/HHz/"; всегда валидируется схемой;
   владелец — ingest_gfs.py (ADR-001 §3.1).
 
 Потребитель (forecast_main.py) строит реальный путь как:
   Path(storage_root) / relative_path
+
+  Пример: `Path('data/storage') / 'gfs/20260513/12z/'`
+  = `data/storage/gfs/20260513/12z/`
 
 ## Consequences
 
