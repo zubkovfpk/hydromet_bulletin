@@ -360,12 +360,13 @@ python forecast_main.py --cycle {morning|evening}
 - **DT-13-3** ✅ **Закрыт (сессия 14, 90523af)**: date policy теперь учитывает GFS availability check + fallback today-1 при отсутствии GFS за today.
 - **DT-13-4** ✅ **Закрыт (сессия 14, bd70c79 + 6efa10e)**: storage layout migration (meteo-side) + CMEMS wave contract/discovery (wave-side).
 - **DT-13-6** ✅ **closed (S17, a06a47e)**: legacy/reserved keys помечены в `config.example.ini`.
-- **DT-14-V**: unified `forecast_main.py` CLI — **near-complete (final on hard-cut S18)**. Закрыта ingestion + deprecation (15.D.3/D.4), pipeline + .docx (15.E.1), email + exit codes (15.E.2); финальная пометка — на closeout S16/S18.
+- **DT-14-V** ✅ **closed (S18, `df75e2f`)**: hard-cut legacy runners, entrypoint.sh + docker-compose.yml on-demand, crontab только ingest.
 - **DT-14-U**: email delivery verification — **closed (S17, 9ea704e)**.
 - **DT-14-T**: `.docx` filename convention — **closed (15.D.4, `526e549`)**.
 - **DT-14-S**: `RuntimeWarning: Mean of empty slice` от `nanmean` в `collect_wave_data.py` — **closed (S17, 172d1e6)**.
 - **DT-14-Y**: exit code propagation в forecast runner — **closed (15.E.2, `4083d37`)**.
-- **DT-14-Z**: scheduled ingestion + archive rotation — **closed (15.D.3-2, `f9fb17a`; semantics → DT-16-2)**.
+- **DT-14-Z** ✅ **closed (15.D.3-2, `f9fb17a`; semantics → DT-16-2)**.
+- **DT-18-1** ✅ **closed (S18, `ebdbfec`)**: ingest_cmems.py с автовычислением CMEMS run параметров (run_hour, first_forecast_dt из UTC).
 - **DT-16-1**: manifest.gfs.storage_path contract alignment — **closed (S17, 526af0d)**.
 - **DT-16-2**: archive rotation semantics (before vs after download) — **closed (S17, 5742618)**.
 - **DT-16-3**: forecast_main start_time ceil per ADR-001 — **closed (S17, 26e5c40)**.
@@ -379,10 +380,10 @@ python forecast_main.py --cycle {morning|evening}
 - **DT-08-2 — одновременная запись в `hydromet.log`**: cron-пересечение morning + evening, один файл — строки могут чередоваться. Приоритет: средний. Этап: сессия 9.
 - **DT-08-3 — ротация логов**: **closed (S17, 42fb832)**.
 - **DT-08-4 — права `/app/logs/` в Dockerfile**: процесс не под root — `mkdir` может дать `PermissionError`. Решение: `RUN mkdir -p /app/logs && chown ...`. Приоритет: средний. Этап: сессия 9.
+- **DT-08-5** ✅ **closed (S18, `e969294`)**: test_retry_on_bad_url изолирован от диска через tempfile.mkdtemp() — flaky тест стабилен.
 - **DT-08-6 — unit-тест `shapefile_dir=None` fallback**: нет проверки дефолтного пути; 1 unit-тест в `tests/test_processing_layout_paths.py`. Приоритет: низкий. Этап: сессия 9.
 - **DT-08-7 — keyword-only сигнатура `collect_*`**: `shapefile_dir` — второй positional-параметр; добавить `*` в сигнатуры для keyword-only принудительно. Приоритет: низкий. Этап: сессия 9.
-- **DT-17-3**: CMEMS ingest не автоматизирован в polling loop
-  forecast_main.py — только GFS. Приоритет: средний. S18.
+- **DT-17-3** ✅ **closed (S18, `d8d9198`)**: CMEMS auto-trigger в polling loop forecast_main.py (_trigger_cmems_ingest, _cmems_manifest_is_ready).
 
 ## 10. Инструкция для AI-ассистента
 

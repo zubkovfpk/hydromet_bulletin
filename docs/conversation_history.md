@@ -2878,3 +2878,40 @@ Session 14 closed.
 - DT-14-V: hard-cut legacy runners.
 - DT-17-3: CMEMS auto-trigger в polling loop.
 - DT-08-5: flaky test_retry_on_bad_url.
+
+---
+
+## Итоги S18 (2026-06-08)
+
+**Основные события**
+
+- ADR конфликт ADR-001 §2 vs ADR-003: разрешён через Amend.
+  ADR-003 частично supersedes ADR-001 §2 как временный
+  trade-off (S17-S19). Целевая архитектура S20+.
+- DT-14-V: удалены forecast_morning.py + forecast_evening.py.
+  Docker инфраструктура переписана под on-demand модель.
+  crontab — только ingest_gfs.py 4×/сутки.
+- DT-18-1/DT-14-Z: создан ingest_cmems.py. Автовычисление
+  CMEMS run_hour + first_forecast_dt из UTC времени.
+  CLI флаг --snapshot (ADR-001 §5.2).
+- DT-17-3: CMEMS добавлен в polling loop forecast_main.
+  Оба ingest (GFS + CMEMS) триггерятся при устаревшем manifest.
+- DT-08-5: test_retry_on_bad_url изолирован от реального диска
+  через tempfile.mkdtemp() — тест стабилен.
+- S18.4: Makefile + run.sh для операторов сервера.
+
+**Ключевые технические решения**
+
+- CMEMS два run'а в сутки: run_hour="00" если UTC>=12,
+  run_hour="12" (вчера) если UTC<12.
+- _poll_until_ready проверяет оба слоя (GFS + CMEMS) перед
+  запуском pipeline.
+- Docker: bulletin сервис = on-demand (restart: "no"),
+  ingest-cron сервис = фоновый (restart: unless-stopped).
+
+**Что не закрыто → S19**
+
+- E2E тест на реальном сервере.
+- DT-10-5: _build_mask оптимизация.
+- Merge в master.
+- HTTP API спецификация (S20+).

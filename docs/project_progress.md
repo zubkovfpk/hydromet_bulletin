@@ -521,7 +521,8 @@ filename-конвенция `.docx` и подготовка к боевой emai
 
 ## Сессия 18 — план
 
-**Дата открытия:** TBD.
+**Дата открытия:** 2026-06-08.
+**Дата закрытия:** 2026-06-08.
 
 **Состав задач (по приоритету)**
 
@@ -537,6 +538,60 @@ filename-конвенция `.docx` и подготовка к боевой emai
 
 - Merge feature/bulletin-generation в master — отдельно.
 - HTTP API — S20+.
+
+---
+
+## Итоги Сессии 18 (2026-06-08)
+
+**Закрытые задачи**
+
+- ADR-001/003 amend (`90cdffb`) — задокументирован trade-off
+  локальной оркестрации (S17-S19) vs целевой архитектуры (S20+).
+- DT-14-V closed (`df75e2f`) — hard-cut forecast_morning.py +
+  forecast_evening.py; entrypoint.sh + docker-compose.yml
+  переписаны под on-demand модель; crontab — только ingest 4×/сутки.
+- DT-18-1 + DT-14-Z closed (`ebdbfec`) — ingest_cmems.py с
+  автовычислением run_hour + first_forecast_dt из UTC времени.
+- DT-17-3 closed (`d8d9198`) — CMEMS auto-trigger в polling loop
+  forecast_main.py (_trigger_cmems_ingest, _cmems_manifest_is_ready).
+- DT-08-5 closed (`e969294`) — изолирован storage_dir в
+  test_retry_on_bad_url через tempfile.mkdtemp().
+- S18.4 closed (`fb0f3c6`) — Makefile + run.sh для операторов
+  сервера (on-demand запуск бюллетеня).
+
+**Регрессионная база на закрытие S18**
+
+- 185 passed, 4 skipped, 1 xfailed, 0 failed.
+- Baseline S18 после DT-14-V: 179 passed (удалены тесты
+  legacy runners).
+
+**Новые файлы**
+
+- ingest_cmems.py — on-demand CMEMS ingestion CLI.
+- Makefile — команды для технических операторов.
+- run.sh — скрипт для нетехнических операторов.
+- docs/adr/003-ondemand-ingest-orchestration.md — уточнён
+  (частично supersedes ADR-001 §2, временный trade-off S17-S19).
+
+## Сессия 19 — план
+
+**Дата открытия:** TBD.
+
+**Состав задач (по приоритету)**
+
+- 19.1 — End-to-end тест на сервере: развернуть Docker,
+  проверить полный цикл ingest + forecast_main.
+- 19.2 — DT-10-5: оптимизация _build_mask через geopandas.sjoin
+  (если время сборки станет проблемой на сервере).
+- 19.3 — Merge feature/bulletin-generation в master
+  (после успешного E2E на сервере).
+- 19.4 — Подготовка к HTTP API (S20+): спецификация endpoints,
+  выбор фреймворка (FastAPI/Flask).
+
+**Out of scope S19**
+
+- HTTP API реализация — S20+.
+- AI-scheduler (DT-15-AI-1) — S20+.
 
 **Решения по политике сессии**
 
