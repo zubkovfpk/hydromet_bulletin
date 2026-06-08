@@ -53,6 +53,18 @@ gantt
     15.D.4 deprecation + README      :done, 2026-05-13, 1d
     15.E Migration + SMTP verify     :done, 2026-05-14, 1d
     %% Note: 15.E closed partial — DT-14-U (SMTP verify) deferred to S17.1.
+    section Сессия 17 (production hardening)
+    17.1 Manifest contract ADR-002   :done, 2026-06-04, 1d
+    17.2 Polling loop ADR-003        :done, 2026-06-04, 1d
+    17.3 SMTP verify + closeout      :done, 2026-06-05, 1d
+    section Сессия 18 (CMEMS + on-demand final)
+    18.1 Hard-cut legacy runners     :done, 2026-06-08, 1d
+    18.2 ingest_cmems.py DT-18-1     :done, 2026-06-08, 1d
+    18.3 CMEMS auto-trigger DT-17-3 :done, 2026-06-08, 1d
+    18.4 Makefile + run.sh           :done, 2026-06-08, 1d
+    section Сессия 19 (E2E + merge)
+    19.1 E2E on server               :active, 2026-06-09, 2d
+    19.2 Merge to master             :2026-06-12, 1d
 ```
 
 ## Хронология сессий
@@ -74,40 +86,39 @@ gantt
 | 13 | 20.04.2026 | ~4 ч | DT-12-2 (temporal validation) закрыт; `forecast_days`→`forecast_hours` (DT-13-1); CMEMS-only dry-run policy (DT-13-2); выявлены DT-13-3/4/6 |
 | 14 | 21–22.04.2026 | ~5 ч | Dry-run → `.docx` end-to-end; DT-13-3/4 закрыты; аудит DT-13-6; parking lot DT-14-S/T/U/V/Y/Z зафиксированы |
 | 15 | 22.04.2026 | ~6 ч (13:00–19:00 MSK) | ADR-001 on-demand (X-variant) зафиксирован; `forecast_main.py` skeleton + CLI + `msk_to_utc` + `resolve_gfs_cycle` + `resolve_cmems_layer` (31 passed); canonical docs синхронизированы; `.gitignore` cleanup (DT-15-A); 15.D.3/D.4/15.E перенесены в S16 |
+| 16 | 13–14.05.2026 | ~8 ч | ingest_gfs.py + foundation (manifest, events, archive rotation), deprecation legacy runners, filename convention DT-14-T, exit codes DT-14-Y; 179 passed после удаления legacy тестов |
+| 17 | 04–05.06.2026 | ~6 ч | DT-16-1..5 (manifest contract ADR-002, archive semantics, ceil time, strict-manifest), DT-17-1 (polling loop ADR-003), DT-14-U (SMTP verify), ADR-003 создан; 185 passed, 4 skipped, 1 xfailed |
+| 18 | 08.06.2026 | ~5 ч | DT-14-V (hard-cut legacy runners), DT-17-3 (CMEMS auto-trigger в polling loop), DT-18-1 (ingest_cmems.py), DT-08-5 (flaky test fix), S18.4 (Makefile + run.sh); canonical docs синхронизированы |
 
 ## Общий прогресс
 
-Общий прогресс: **64%**
+Общий прогресс: **95%**
 
 Примечание: формат «Общий прогресс: **NN%**» — машинно-обновляемый,
 процент пересчитывается автоматически по mermaid-gantt
 (done / total задач, где section-заголовки и active/pending не считаются done).
-Снижение относительно предыдущего значения «~80% на начало S15»
-связано с расширением gantt новой секцией «Сессия 15 (архитектура on-demand)»
-и детализацией оставшихся задач, а не с регрессом по факту сделанного.
 
-**Прогноз к концу S15:** ~90% при закрытии DT-14-V + DT-14-U + 3-of-3 should (T, S, Y).
+**Прогноз к концу S19:** 100% при закрытии E2E теста на сервере и merge в master.
 
 ```mermaid
-pie title Прогресс проекта (начало S15)
-  "Выполнено" : 80
-  "S15 scope" : 10
-  "Осталось после S15" : 10
+pie title Прогресс проекта (после S18)
+  "Выполнено S1–S18" : 95
+  "S19 E2E + merge" : 5
 ```
 
-### Открытые DT на вход S16 (по итогам S15)
-- **DT-14-V** unified forecast CLI — **near-complete (final on S16 closeout)**: skeleton + argparse + `msk_to_utc` + `resolve_gfs_cycle` + `resolve_cmems_layer` закрыты в S15; ingestion + deprecation закрыты в 15.D.3/D.4; pipeline glue + `.docx` закрыты в 15.E.1; email-слой + exit codes закрыты в 15.E.2. Финальная пометка — 15.E.3.
-- **DT-14-U** email delivery verification on prod corporate SMTP — **deferred (S17.1 prerequisite + manual verify)**.
-- **DT-14-T** `.docx` filename convention `Прогноз_{cycle}_{start_date}.docx` — **closed (15.D.4, `526e549`)**.
-- **DT-14-S** `RuntimeWarning: Mean of empty slice` in `collect_wave_data.py` — не трогалось в S15; остаётся открытым для S16+.
-- **DT-14-Y** pipeline exit codes propagation (0/1/2/3/>=10) — **closed (15.E.2, `4083d37`)**.
-- **DT-14-Z** scheduled ingestion + archive rotation — **closed (15.D.3-2, `f9fb17a`; semantics → DT-16-2)**.
-- **DT-15-A** cleanup untracked debug artifacts — закрыт в 15.F через расширение `.gitignore`.
-- **DT-16-1** manifest.gfs.storage_path contract alignment — **open (S17.1)**.
-- **DT-16-2** archive rotation semantics (before vs after download) — **open (S17.1)**.
-- **DT-16-3** forecast_main start_time ceil per ADR-001 — **open (S17.2)**.
-- **DT-16-4** strict-manifest mode in forecast_main — **open (S17.2)**.
-- **DT-16-5** README cleanup of legacy operational commands — **open (15.E.3)**.
+### Открытые задачи на вход S19 (по итогам S18)
+
+**Must (критический путь):**
+- **S19.1** End-to-end тест на сервере — Docker deploy, полный цикл ingest → forecast_main → .docx → email.
+- **S19.3** Merge `feature/bulletin-generation` в `master` после успешного E2E.
+
+**Should:**
+- **DT-10-5** `_build_mask` оптимизация — только если latency на сервере станет проблемой.
+
+**Out of scope S19 (S20+):**
+- HTTP API реализация (endpoints, FastAPI/Flask).
+- AI-scheduler (DT-15-AI-1).
+- Sweep cleanup DT-08-2, DT-08-6, DT-08-7 (логи, тесты).
 
 ## Deferred tasks
 

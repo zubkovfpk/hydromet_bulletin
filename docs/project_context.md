@@ -34,20 +34,38 @@ GFS (NOMADS) и волновых данных CMEMS, обработка, ген�
 hydromet_bulletin/
 │
 │  .gitignore
+│  .env.example                шаблон переменных окружения (коммитится)
 │  config.example.ini          шаблон конфига с CHANGE_ME (коммитится)
-│  fetch_inputs.py             точка входа слоя загрузки (CMEMS + GFS)          done
-│  forecast_morning.py         генерация утреннего бюллетеня → docx → email     done
-│  forecast_evening.py         генерация вечернего бюллетеня → docx → email     done
+│  config.ini                  рабочий конфиг (в .gitignore)
+│  crontab                     расписание cron для фонового ingest
+│  docker-compose.yml          Docker orchestration (on-demand bulletin + cron ingest)
+│  Dockerfile                  образ контейнера
+│  entrypoint.sh               entrypoint для Docker (on-demand модель)
+│  forecast_main.py            единая точка входа — pipeline + polling loop (ADR-003)
+│  ingest_cmems.py            on-demand CMEMS ingestion CLI (DT-18-1, S18)
+│  ingest_gfs.py              on-demand GFS ingestion CLI (ADR-001 §5.2)
+│  Makefile                    операторские команды (S18.4)
 │  requirements.txt            зависимости Python
+│  run.sh                      скрипт запуска бюллетеня on-demand (S18.4)
 │  windsurf.rules.md           правила редактирования для AI
 │
+├─ .cursor/
+│    └─ rules/                 canonical rules для AI-ассистентов
+│         manifest-paths-contract.mdc
+│         review-before-edit.mdc
+│
 ├─ docs/
+│    adr/
+│         001-ondemand-ingestion.md        ADR-001: on-demand модель (Amend S18)
+│         002-storage-canon.md             ADR-002: storage paths contract
+│         003-ondemand-ingest-orchestration.md  ADR-003: polling loop (S17)
 │    Collecting_GFS_weather_data.md       бизнес-логика загрузки GFS
 │    Collecting_ocean_disturbance_data.md бизнес-логика загрузки CMEMS
+│    conversation_history.md               история сессий и решений
 │    data_ingestion_design.md             архитектура слоя ingestion
-│    project_progress.md                 прогресс разработки (Mermaid)
+│    project_context.md                   контекст проекта для AI-ассистента
+│    project_progress.md                  прогресс разработки (Mermaid)
 │    Training_Windsurf&Cursor.md         инструкции по работе с AI-агентами
-│    project_context.md         контекст проекта для AI-ассистента
 │
 ├─ data/
 │    └─ shapefiles/
@@ -59,36 +77,42 @@ hydromet_bulletin/
 │              Kasp_Sea.shx
 │
 ├─ matlab_original/             исходные MATLAB-скрипты (только для справки)
-│    forecast_morning.m
-│    forecast_evening.m
-│    collect_meteo_data.m
-│    collect_wave_data.m
-│    precip_statistics.m
-│    temp_statistics_morning.m
-│    temp_statistics_evening.m
-│    wind_statistics.m
-│    Bulletin_example.docx
+│    [MATLAB legacy files...]
 │
-├─ scripts/                     shell-скрипты запуска / управления контейнером
-│    deploy.sh  install.sh  logs.sh  run_now.sh  status.sh  stop.sh  update.sh
+├─ schemas/
+│    manifest_v1.json           JSON Schema манифеста (ADR-002)
 │
-├─ tests/
-│    test_smoke_downloaders.py  smoke-тесты init CMEMSDownloader + GFSDownloader  done
+├─ tests/                       25+ тестов (unit + integration)
+│    test_*.py                  тесты по модулям
 │
-└─ utils/
-     __init__.py
+├─ utils/
+│     __init__.py
+     archive_rotation.py       ротация архива перед download (ADR-001 §3.2)
      collect_meteo_data.py      читает GFS NetCDF (*.nc), маскировка по shp, расчёт полей  done
      collect_wave_data.py       разбор CMEMS NetCDF (hs/tp/dp), агрегация           done
-     validate_outputs.py        validation layer (structure/shape/temporal/data-quality) done
      doc_builder.py             конструктор Word-документа (заголовки, стили)       done
      email_sender.py            отправка .docx по SMTP SSL/TLS (порт 465)           done
+     event_logger.py            логирование событий ingestion (ADR-001 §7)
+     manifest.py                работа с манифестом (ADR-002)
      precip_statistics.py       статистика осадков (freeze_rain, ice_pell, rain, snow) done
+     process_lock.py            блокировки процессов
      temp_statistics.py         температурная статистика (min/max/mean)             done
+     validate_outputs.py        validation layer (structure/shape/temporal/data-quality) done
      wind_statistics.py         преобладающее направление и диапазон скорости ветра done
      │
-     └─ downloaders/
-          cmems_downloader.py   загрузка волн через copernicusmarine + retry/timeout done
-          gfs_downloader.py     загрузка GFS через NOMADS filter HTTP + retry        done
+     ├─ downloaders/
+     │    cmems_downloader.py   загрузка волн через copernicusmarine + retry/timeout done
+     │    gfs_downloader.py     загрузка GFS через NOMADS filter HTTP + retry        done
+     │
+     └─ [other modules...]
+│
+├─ ingest_events/               события ingestion (ADR-001 §7)
+│    ingest_events.jsonl
+│
+├─ logs/                        логи выполнения
+├─ output/                      выходные .docx файлы
+└─ storage/                     манифест и данные
+     manifest.json
 ```
 
 
@@ -124,25 +148,23 @@ hydromet_bulletin/
 - **GFSDownloader**: `__init__` (секции `GFS_*`), `download(date, cycle)` с retry + HTTP streaming через NOMADS filter URL. Smoke-тест: 40/40 файлов, 138.9 с.
 - **Smoke-тесты**: `tests/test_smoke_downloaders.py` — все зелёные (3 теста).
 - **utils-слой**: `collect_meteo_data`, `collect_wave_data`, `doc_builder`, `email_sender`, `precip_statistics`, `temp_statistics`, `wind_statistics` — реализованы (оригинальная кодовая база, конвертирована из MATLAB).
-- **fetch_inputs.py**: точка входа с CLI (`--config`, `--date`, `--cycle`), валидация секций конфига, lazy-импорты для снижения риска тяжёлого старта.
-- **`utils/validate_outputs.py`**: validation layer реализован, интегрирован в pipeline. Коммит: `c2017ff`.
-- **`tests/test_validate_outputs.py`**: создан, **14/14 тестов passed**.
-- **Guard-call `assert_valid_for_bulletin()`**: интегрирован в `forecast_morning.py` и `forecast_evening.py` — fail-fast до statistics-слоя и `doc_builder`.
+- **`forecast_main.py`**: единая точка входа (on-demand CLI + polling loop + pipeline). Интегрирует ingestion → processing → validation → docx → email. Exit codes: 0/1/2/3/5 (ADR-001 §13.3).
+- **`ingest_gfs.py`** / **`ingest_cmems.py`**: on-demand CLI для загрузки данных (ADR-001 §5.2) — auto-compute параметры, manifest update, event logging.
+- **`utils/validate_outputs.py`**: validation layer реализован, интегрирован в pipeline.
+- **`tests/`**: 185+ passed, 4 skipped, 1 xfailed — покрытие unit + integration.
+- **Guard-call `assert_valid_for_bulletin()`**: интегрирован в `forecast_main.py` — fail-fast до statistics-слоя и `doc_builder`.
 
-### В работе
-- В работе (S15, 2026-04-22, 13:00–19:00 MSK): unified `forecast_main.py` CLI (DT-14-V, hard-cut), email verify на боевом корпоративном SMTP (DT-14-U), docx filename convention (DT-14-T), wave empty-slice warning (DT-14-S), structured exit codes (DT-14-Y).
-- **S16, 2026-05-13..14:** реализация Scenario X на уровне runner
-  и ingestion слоя. Закрыты 15.D.3 (ingest_gfs.py + foundation +
-  archive + manifest), 15.D.4 (deprecation legacy + DT-14-T
-  filename + README), 15.E.1 (pipeline + .docx),
-  15.E.2 (email + DT-14-Y exit codes), 15.E.2-fix (storage из
-  config.ini), 15.E.2-robustness (event_logger safety, dry-run
-  без FS-side-effect), 15.E.3 (README cleanup + docs closeout).
-  DT-14-Y / DT-14-T / DT-14-Z / DT-15-A — closed.
-  DT-14-U — deferred (S17.1 prerequisite + manual SMTP verify).
-  DT-14-V — partial (final on hard-cut S18).
-  DT-14-S — parking lot.
-  Введены DT-16-1..5 (см. раздел 9).
+### В работе (S19 — current)
+- **S19.1:** End-to-end тест на реальном сервере (Docker deploy + полный цикл ingest + forecast_main).
+- **S19.2:** DT-10-5 — оптимизация `_build_mask` через `geopandas.sjoin` (если время сборки станет проблемой).
+- **S19.3:** Merge `feature/bulletin-generation` в `master` после успешного E2E.
+- **S19.4:** Подготовка к HTTP API (S20+): спецификация endpoints, выбор фреймворка (FastAPI/Flask).
+
+### Завершённые сессии (S15–S18)
+- **S15 (2026-04-22):** ADR-001 on-demand (X-variant), `forecast_main.py` skeleton + CLI + `msk_to_utc` + `resolve_gfs_cycle` + `resolve_cmems_layer`.
+- **S16 (2026-05-13..14):** ingest_gfs.py + foundation (manifest, events, archive), deprecation legacy runners, filename convention, exit codes.
+- **S17 (2026-06-04..05):** DT-16-1..5 (manifest contract, archive rotation, ceil time, strict-manifest), DT-17-1 (polling loop + auto-trigger GFS), DT-14-U (SMTP verify), ADR-002 + ADR-003.
+- **S18 (2026-06-08):** DT-14-V (hard-cut legacy runners), DT-17-3 (CMEMS auto-trigger), DT-18-1 (ingest_cmems.py), DT-08-5 (flaky test fix), S18.4 (Makefile + run.sh).
 
 ### Не начато
 - Интеграционные тесты end-to-end (полный цикл forecast → docx → email): **частично выполнены** (сессия 14) — dry-run → `.docx` пройден; осталось подтверждение доставки email (DT-14-U).
@@ -317,36 +339,43 @@ c2017ff feat: add validate_outputs module with pipeline guard (v1)
 
 ## 9. Deferred tasks / Future work
 
-### 9.0 Session 15 — active scope (open 2026-04-22, 13:00 MSK)
+### 9.0 Session 19 — active scope (open: TBD)
 
-**Session DoD (must):**
-- **DT-14-V** — единый `forecast_main.py` в корне репо; `forecast_morning.py` / `forecast_evening.py` удалены (hard-cut, без deprecation shim); `crontab`, `docker-compose.yml`, `entrypoint.sh` синхронно обновлены в том же PR.
-- **DT-14-U** — email delivery верифицирован на боевом корпоративном SMTP; артефакт: `Message-ID` в логах `email_sender` + подтверждение получения.
+**S19.1 — End-to-end тест на сервере (must)**
+- Docker deploy на реальном сервере.
+- Полный цикл: cron ingest → `forecast_main.py --date --time` → `.docx` → email.
+- Артефакт: подтверждённое письмо в ящике получателя.
 
-**Session DoD (should):**
-- **DT-14-T** — filename convention `Прогноз_{cycle_ru}_{start_date:YYYYMMDD}.docx`; функция `resolve_start_date(cycle, run_hour, run_date)` + unit-тесты на границах суток MSK/UTC.
-- **DT-14-S** — устранён `RuntimeWarning: Mean of empty slice` в `collect_wave_data.py`; регрессионный тест на all-NaN срезе.
-- **DT-14-Y** — exit codes pipeline: `0` success, `1` validation fail, `2` ingestion fail, `3` delivery fail, `>=10` internal; смоук-тест на пустом GFS → exit 2.
+**S19.2 — DT-10-5: _build_mask оптимизация (should)**
+- Текущий Python-цикл 721×1440 (~25–30 с) не блокирует production.
+- Оптимизация через `geopandas.sjoin` + bbox Каспия — при росте latency.
+- Приоритет: low до появления проблемы на сервере.
 
-**Stretch:**
-- DT-14-Z — cron wrapper + archive rotation (если есть время до 19:00 MSK).
+**S19.3 — Merge в master (must)**
+- Условие: успешный E2E на сервере (S19.1).
+- Финальный рефакторинг, cleanup, README update.
 
-**Out of scope (→ S16+):**
-- Финальный merge в `master`, полный E2E, DT-10-5 (_build_mask opt), DT-08-* (logging hygiene), DT-13-6 (full config cleanup).
+**S19.4 — HTTP API спецификация (S20+, stretch)**
+- Endpoints: POST /bulletin (on-demand), GET /status (manifest health).
+- Фреймворк: FastAPI vs Flask — выбор по нагрузке.
+- Out of scope S19, приоритет S20+.
 
-**Архитектурные решения S15:**
-- **CLI контракт** `forecast_main.py` (в корне репо):
-python forecast_main.py --cycle {morning|evening}
---run-hour {00|06|12|18}
-[--date YYYY-MM-DD] # MSK; default = today MSK
-[--dry-run]
-[--no-email]
-- **Таймзона `--date`**: интерпретация в **MSK** (`Europe/Moscow`), явная конверсия в UTC внутри (`zoneinfo.ZoneInfo("Europe/Moscow")` → `astimezone(UTC)`) перед запросами к GFS/CMEMS.
-- **Shared runner**: общая логика — в `utils/forecast_runner.py`; cycle-specific — через диспетчер по `--cycle`.
-- **SMTP**: корпоративный; креды только в `config.ini` на машине оператора (в репо/логи/чат не попадают).
+### 9.1 Out of scope S19
 
-**Parking lot carried from S14 (scope S15):** DT-14-V, DT-14-U, DT-14-T, DT-14-S, DT-14-Y.
-**Parking lot carried to S16:** DT-14-Z, DT-10-5, DT-08-* (logging), DT-13-6 (full config cleanup).
+- **HTTP API реализация** — S20+.
+- **AI-scheduler (DT-15-AI-1)** — S20+.
+- **Sweep cleanup** DT-08-2, DT-08-6, DT-08-7 — отложены до необходимости.
+
+### 9.2 Parking lot (открытые DT после S18)
+
+| ID | Задача | Приоритет | Этап |
+|----|--------|-----------|------|
+| DT-10-5 | `_build_mask` оптимизация через `geopandas.sjoin` | low | S19.2 |
+| DT-08-2 | Cron-пересечение: раздельные логи morning/evening | low | Sweep |
+| DT-08-6 | Unit-тест `shapefile_dir=None` fallback | low | Sweep |
+| DT-08-7 | Keyword-only сигнатуры `collect_*` | low | Sweep |
+
+### 9.3 Closed DT (история для справки)
 
 - **DT-01 — GFS GRIB2 → NetCDF conversion / preprocessing** ✅ **Закрыт (сессия 10, MVP).** Реализован Вариант A: `_convert_grib_to_netcdf` + `convert_existing` в `gfs_downloader.py`, sidecar `.nc` рядом с GRIB2, 9 переменных с правильным маппингом, `lat`/`lon` дименсии. DoD подтверждён: `collect_meteo_data` находит 40/40 `.nc` и читает все 9 переменных в dry-run `forecast_morning.py --date 20260415`.
 - **DT-10-3 — Shape mismatch маски и данных** ✅ **Закрыт (сессия 11, Вариант A, 72c6557).** Удалён `.T` в meshgrid `collect_meteo_data.py`: `Lon, Lat = np.meshgrid(lon_arr, lat_arr)` (no `.T`). Маска `(721,1440)` = данные `(721,1440,n)`. `mask shape=(721,1440)`, `cells_inside=236`. DoD выполнен. Downstream-чек: ни один downstream-модуль не предполагает `(n_lon,n_lat)`. Новые тесты: `test_collect_meteo_mask_orientation.py` (2 теста passed).
