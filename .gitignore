@@ -82,3 +82,4 @@ project_files.txt
 diff_*.patch
 pre-flight.sh
 Git_Bash_pre-flight_prompt.txt
+!ingest_cmems.py

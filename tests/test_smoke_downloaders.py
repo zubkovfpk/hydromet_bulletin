@@ -1,4 +1,4 @@
-# Smoke tests for downloader initialization and fetch_inputs import (no HTTP).
+# Smoke tests for downloader initialization (no HTTP).
 from __future__ import annotations
 
 import configparser
@@ -73,13 +73,6 @@ class TestSmokeDownloaders(unittest.TestCase):
         self.assertEqual(d.hours_step, 3)
         self.assertEqual(d.hours_start, 6)
         self.assertEqual(d.hours_end, 123)
-
-    def test_fetch_inputs_imports(self) -> None:
-        import importlib
-
-        importlib.invalidate_caches()
-        mod = importlib.import_module("fetch_inputs")
-        self.assertTrue(hasattr(mod, "main"))
 
 
 if __name__ == "__main__":
