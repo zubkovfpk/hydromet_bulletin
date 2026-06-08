@@ -1,12 +1,32 @@
 # Гидрометеорологический бюллетень — расписание cron (UTC)
-# MSK = UTC+3: 09:00 MSK → 06:00 UTC | 19:00 MSK → 16:00 UTC
+# Предзагрузка GFS данных 4×/сутки (по циклам 00Z/06Z/12Z/18Z)
+# Генерация бюллетеня — on-demand через forecast_main.py
 #
 # Формат: минута час день месяц день_недели команда
 
-# Утренний бюллетень — 09:00 MSK (06:00 UTC)
-0 6 * * * root cd /app && /usr/local/bin/python forecast_morning.py --config /app/config.ini >> /app/logs/cron.log 2>&1
+# GFS ingest: 00Z цикл готов ~03:30 UTC → запуск в 04:00 UTC
+30 3 * * * root cd /app && \
+  HYDROMET_INGEST_EVENTS_PATH=/app/ingest_events/ingest_events.jsonl \
+  /usr/local/bin/python ingest_gfs.py \
+  >> /app/logs/cron.log 2>&1
 
-# Вечерний бюллетень — 19:00 MSK (16:00 UTC)
-0 16 * * * root cd /app && /usr/local/bin/python forecast_evening.py --config /app/config.ini >> /app/logs/cron.log 2>&1
+# GFS ingest: 06Z цикл готов ~09:30 UTC → запуск в 10:00 UTC
+0 10 * * * root cd /app && \
+  HYDROMET_INGEST_EVENTS_PATH=/app/ingest_events/ingest_events.jsonl \
+  /usr/local/bin/python ingest_gfs.py \
+  >> /app/logs/cron.log 2>&1
+
+# GFS ingest: 12Z цикл готов ~15:30 UTC → запуск в 16:00 UTC
+0 16 * * * root cd /app && \
+  HYDROMET_INGEST_EVENTS_PATH=/app/ingest_events/ingest_events.jsonl \
+  /usr/local/bin/python ingest_gfs.py \
+  >> /app/logs/cron.log 2>&1
+
+# GFS ingest: 18Z цикл готов ~21:30 UTC → запуск в 22:00 UTC
+0 22 * * * root cd /app && \
+  HYDROMET_INGEST_EVENTS_PATH=/app/ingest_events/ingest_events.jsonl \
+  /usr/local/bin/python ingest_gfs.py \
+  >> /app/logs/cron.log 2>&1
 
 # Пустая строка в конце — обязательно для cron
+
