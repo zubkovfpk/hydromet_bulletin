@@ -4,7 +4,9 @@ from __future__ import annotations
 import configparser
 import logging
 import os
+import shutil
 import sys
+import tempfile
 import types
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -112,6 +114,12 @@ class TestGFSIntegration(unittest.TestCase):
         test_logger.addHandler(logging.StreamHandler(sys.stdout))
 
         downloader = GFSDownloader(cfg_bad, logger=test_logger)
+
+        # DT-08-5: Use isolated temp storage to avoid "skip (exists)" masking retry logic.
+        tmp_storage = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp_storage, ignore_errors=True)
+        downloader.storage_dir = Path(tmp_storage)
+        downloader.work_dir = Path(tmp_storage) / "work"
 
         # "monkeypatch" equivalent: override instance field.
         downloader.main_url = "http://127.0.0.1:9/definitely-not-working"
