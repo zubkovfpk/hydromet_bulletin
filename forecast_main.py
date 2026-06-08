@@ -418,6 +418,28 @@ def _manifest_is_ready(
     return cycle is not None and cycle == effective_gfs_cycle
 
 
+def _cmems_manifest_is_ready(
+    manifest: dict[str, Any],
+    resolved_cmems_layer: date,
+) -> bool:
+    """
+    Return True if manifest contains a CMEMS layer matching
+    resolved_cmems_layer (DT-17-3).
+    """
+    cmems_block = manifest.get("cmems")
+    if not isinstance(cmems_block, dict):
+        return False
+    layer_str = cmems_block.get("latest_successful_layer_date")
+    if not isinstance(layer_str, str):
+        return False
+    try:
+        from datetime import date as date_type
+        manifest_layer = date_type.fromisoformat(layer_str)
+    except ValueError:
+        return False
+    return manifest_layer == resolved_cmems_layer
+
+
 def _trigger_ingest(
     cycle: datetime,
     logger: logging.Logger,
@@ -437,29 +459,55 @@ def _trigger_ingest(
     return subprocess.Popen(cmd)
 
 
+def _trigger_cmems_ingest(
+    layer_date: date,
+    logger: logging.Logger,
+) -> subprocess.Popen:
+    """
+    Launch ingest_cmems.py as a non-blocking subprocess (DT-17-3).
+    """
+    snapshot_str = layer_date.isoformat()
+    cmd = [
+        sys.executable,
+        str(Path(__file__).parent / "ingest_cmems.py"),
+        "--snapshot", snapshot_str,
+    ]
+    logger.info("on-demand: launching ingest_cmems.py --snapshot %s",
+                snapshot_str)
+    return subprocess.Popen(cmd)
+
+
 def _poll_until_ready(
     *,
     effective_gfs_cycle: datetime,
+    resolved_cmems_layer: date,
     timeout_minutes: int,
     polling_minutes: int,
     no_ingest: bool,
     logger: logging.Logger,
 ) -> int | None:
     """
-    Ensure manifest is ready for effective_gfs_cycle.
-    Returns None if ready, exit code otherwise (ADR-003).
+    Ensure manifest is ready for effective_gfs_cycle and resolved_cmems_layer.
+    Returns None if ready, exit code otherwise (ADR-003, DT-17-3).
     """
     manifest = _read_manifest_for_run(MANIFEST_PATH, dry_run=False, logger=logger)
-    if _manifest_is_ready(manifest, effective_gfs_cycle):
+    gfs_ready = _manifest_is_ready(manifest, effective_gfs_cycle)
+    cmems_ready = _cmems_manifest_is_ready(manifest, resolved_cmems_layer)
+    if gfs_ready and cmems_ready:
         logger.info(
-            "on-demand: manifest already ready for %s",
+            "on-demand: manifest already ready (GFS=%s, CMEMS=%s)",
             _format_cycle_for_events(effective_gfs_cycle),
+            resolved_cmems_layer.isoformat(),
         )
         return None
 
     ingest_proc: subprocess.Popen | None = None
+    cmems_proc: subprocess.Popen | None = None
     if not no_ingest:
-        ingest_proc = _trigger_ingest(effective_gfs_cycle, logger)
+        if not gfs_ready:
+            ingest_proc = _trigger_ingest(effective_gfs_cycle, logger)
+        if not cmems_ready:
+            cmems_proc = _trigger_cmems_ingest(resolved_cmems_layer, logger)
 
     deadline = time.monotonic() + timeout_minutes * 60
     poll_interval = polling_minutes * 60
@@ -467,13 +515,18 @@ def _poll_until_ready(
     while time.monotonic() < deadline:
         time.sleep(min(poll_interval, deadline - time.monotonic()))
         manifest = _read_manifest_for_run(MANIFEST_PATH, dry_run=False, logger=logger)
-        if _manifest_is_ready(manifest, effective_gfs_cycle):
+        gfs_ready = _manifest_is_ready(manifest, effective_gfs_cycle)
+        cmems_ready = _cmems_manifest_is_ready(manifest, resolved_cmems_layer)
+        if gfs_ready and cmems_ready:
             logger.info(
-                "on-demand: manifest ready for %s after polling",
+                "on-demand: manifest ready after polling "
+                "(GFS=%s, CMEMS=%s)",
                 _format_cycle_for_events(effective_gfs_cycle),
+                resolved_cmems_layer.isoformat(),
             )
-            if ingest_proc is not None:
-                ingest_proc.wait(timeout=10)
+            for proc in (ingest_proc, cmems_proc):
+                if proc is not None:
+                    proc.wait(timeout=10)
             return None
 
         if ingest_proc is not None and ingest_proc.poll() is not None:
@@ -486,15 +539,26 @@ def _poll_until_ready(
                 )
                 return 2
 
+        if cmems_proc is not None and cmems_proc.poll() is not None:
+            rc = cmems_proc.returncode
+            if rc != 0:
+                logger.error(
+                    "on-demand: ingest_cmems.py exited %d; "
+                    "CMEMS manifest not ready (exit 2)", rc,
+                )
+                return 2
+
     logger.error(
         "on-demand: timeout after %dm waiting for manifest "
-        "(cycle=%s); exit %d",
+        "(cycle=%s, layer=%s); exit %d",
         timeout_minutes,
         _format_cycle_for_events(effective_gfs_cycle),
+        resolved_cmems_layer.isoformat(),
         EXIT_TIMEOUT,
     )
-    if ingest_proc is not None and ingest_proc.poll() is None:
-        ingest_proc.terminate()
+    for proc in (ingest_proc, cmems_proc):
+        if proc is not None and proc.poll() is None:
+            proc.terminate()
     return EXIT_TIMEOUT
 
 
@@ -729,6 +793,7 @@ def main(argv: list[str] | None = None) -> int:
         if not args.dry_run and not args.strict_manifest:
             poll_exit = _poll_until_ready(
                 effective_gfs_cycle=effective_gfs_cycle,
+                resolved_cmems_layer=resolved_cmems_layer,
                 timeout_minutes=args.timeout_minutes,
                 polling_minutes=args.polling_minutes,
                 no_ingest=args.no_ingest,

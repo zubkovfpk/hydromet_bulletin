@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -45,9 +45,11 @@ def test_manifest_already_ready_skips_ingest(tmp_path, monkeypatch):
         "_trigger_ingest",
         lambda *a, **kw: triggered.append(1) or MagicMock(),
     )
+    monkeypatch.setattr(forecast_main, "_cmems_manifest_is_ready", lambda *a, **kw: True)
 
     result = forecast_main._poll_until_ready(
         effective_gfs_cycle=CYCLE,
+        resolved_cmems_layer=date(2026, 5, 14),
         timeout_minutes=1,
         polling_minutes=1,
         no_ingest=False,
@@ -69,12 +71,14 @@ def test_no_ingest_flag_skips_subprocess(tmp_path, monkeypatch):
         "_trigger_ingest",
         lambda *a, **kw: triggered.append(1) or MagicMock(),
     )
+    monkeypatch.setattr(forecast_main, "_cmems_manifest_is_ready", lambda *a, **kw: True)
 
     monkeypatch.setattr(forecast_main.time, "sleep", lambda s: None)
     monkeypatch.setattr(forecast_main.time, "monotonic", lambda: 0.0)
 
     result = forecast_main._poll_until_ready(
         effective_gfs_cycle=CYCLE,
+        resolved_cmems_layer=date(2026, 5, 14),
         timeout_minutes=0,
         polling_minutes=1,
         no_ingest=True,
@@ -100,12 +104,14 @@ def test_ingest_triggered_when_manifest_stale(tmp_path, monkeypatch):
         return mock_proc
 
     monkeypatch.setattr(forecast_main, "_trigger_ingest", fake_trigger)
+    monkeypatch.setattr(forecast_main, "_cmems_manifest_is_ready", lambda *a, **kw: True)
 
     monkeypatch.setattr(forecast_main.time, "sleep", lambda s: None)
     monkeypatch.setattr(forecast_main.time, "monotonic", lambda: 0.0)
 
     result = forecast_main._poll_until_ready(
         effective_gfs_cycle=CYCLE,
+        resolved_cmems_layer=date(2026, 5, 14),
         timeout_minutes=0,
         polling_minutes=1,
         no_ingest=False,
@@ -125,6 +131,7 @@ def test_poll_returns_none_when_manifest_updates(tmp_path, monkeypatch):
     mock_proc.poll.return_value = None
     mock_proc.wait.return_value = 0
     monkeypatch.setattr(forecast_main, "_trigger_ingest", lambda *a, **kw: mock_proc)
+    monkeypatch.setattr(forecast_main, "_cmems_manifest_is_ready", lambda *a, **kw: True)
 
     call_count = [0]
     original_read = forecast_main._read_manifest_for_run
@@ -143,9 +150,38 @@ def test_poll_returns_none_when_manifest_updates(tmp_path, monkeypatch):
 
     result = forecast_main._poll_until_ready(
         effective_gfs_cycle=CYCLE,
+        resolved_cmems_layer=date(2026, 5, 14),
         timeout_minutes=5,
         polling_minutes=1,
         no_ingest=False,
         logger=logging.getLogger("test"),
     )
     assert result is None
+
+
+def test_cmems_triggered_when_not_ready(tmp_path, monkeypatch):
+    """CMEMS ingest triggered when CMEMS manifest is stale."""
+    manifest_path = tmp_path / "storage" / "manifest.json"
+    _write_manifest(manifest_path, CYCLE_STR)
+    monkeypatch.setattr(forecast_main, "MANIFEST_PATH", manifest_path)
+
+    cmems_triggered = []
+    monkeypatch.setattr(forecast_main, "_trigger_cmems_ingest",
+        lambda layer, logger: cmems_triggered.append(layer)
+        or MagicMock())
+    monkeypatch.setattr(forecast_main, "_trigger_ingest",
+        lambda *a, **kw: MagicMock())
+    monkeypatch.setattr(forecast_main.time, "sleep", lambda s: None)
+    monkeypatch.setattr(forecast_main.time, "monotonic", lambda: 0.0)
+
+    stale_cmems = date(2026, 5, 13)  # не совпадает с manifest
+    result = forecast_main._poll_until_ready(
+        effective_gfs_cycle=CYCLE,
+        resolved_cmems_layer=stale_cmems,
+        timeout_minutes=0,
+        polling_minutes=1,
+        no_ingest=False,
+        logger=logging.getLogger("test"),
+    )
+    assert result == forecast_main.EXIT_TIMEOUT
+    assert len(cmems_triggered) == 1
