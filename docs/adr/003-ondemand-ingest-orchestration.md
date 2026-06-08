@@ -45,7 +45,9 @@ forecast_main знает только команду:
 
 ## Exit codes
 
-- 0: бюллетень сформирован и отправлен
-- 2: ошибка данных (ingest failed, manifest corrupted)
-- 3: delivery failure (SMTP)
-- 5: timeout ожидания готовности данных (polling timeout)
+Полная таблица exit codes — ADR-001 §13.3 (единственный
+источник правды). ADR-003 использует:
+- 2: ingest failed или manifest не обновился после subprocess
+- 5: polling timeout (EXIT_TIMEOUT, DT-17-1)
+
+Остальные коды (0, 1, 3, 4, >=10) — по ADR-001 §13.3.
