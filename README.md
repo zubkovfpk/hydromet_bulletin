@@ -117,6 +117,22 @@ recipient = адрес1@example.com, адрес2@example.com   # несколь�
 
 ---
 
+## Telegram-бот (подмодуль)
+
+`telegram_bot/` — git submodule ([Beavisinc/bulletin_tg_bot](https://github.com/Beavisinc/bulletin_tg_bot)), разработан коллегой в рамках платформы VIZARD. Подключён как самостоятельный командный интерфейс: Telegram-бот на aiogram + Flask API, генерирует бюллетень по точке (lat/lon) по запросу пользователя, в отличие от основного конвейера этого репозитория (ежедневный email-бюллетень по всей акватории).
+
+Статус: код подключен рядом, архитектурная интеграция (общий слой чтения NetCDF, единый конвейер данных для обоих интерфейсов) запланирована отдельным этапом.
+
+```bash
+# клонирование с submodule
+git clone --recurse-submodules https://github.com/zubkovfpk/hydromet_bulletin.git
+
+# инициализация submodule в уже скачанном репозитории
+git submodule update --init --recursive
+```
+
+⚠️ `telegram_bot/configs/wave_downloader.conf` содержит учётные данные в открытом виде (наследие исходного репозитория) — не публиковать этот репозиторий и не давать доступ к submodule без ротации этих данных.
+
 ## Соответствие MATLAB → Python
 
 | MATLAB | Python |
