@@ -135,7 +135,7 @@ git clone --recurse-submodules https://github.com/zubkovfpk/hydromet_bulletin.gi
 git submodule update --init --recursive
 ```
 
-ℹ️ `telegram_bot/configs/wave_downloader.conf` содержит учётные данные в открытом виде — это тестовый доступ, не коммерческая тайна. Данные, получаемые через этот доступ, могут быть неактуальны или недоступны в любой момент; мы не несём ответственности за решения, принятые на основании полученных через них результатов.
+Содержимое submodule доступно только тем, у кого есть права на приватный репозиторий Beavisinc/bulletin_tg_bot.
 
 ## Соответствие MATLAB → Python
 
